@@ -89,6 +89,23 @@ def cmd_calcular(args):
     return 0
 
 
+def cmd_publicar(args):
+    """Genera el reporte dentro de docs/ (lo que GitHub Pages publica) con index.html como portada."""
+    import shutil
+    dir_web = datos.RAIZ / "docs"
+    args.salida = str(dir_web)
+    rc = cmd_calcular(args)
+    if rc:
+        return rc
+    foco = args.empresa.upper()
+    shutil.copyfile(dir_web / f"PC3_{foco}.html", dir_web / "index.html")
+    (dir_web / ".nojekyll").write_text("")  # que GitHub sirva los archivos tal cual
+    print("\nPágina lista en docs/index.html. Ahora súbela a GitHub:\n"
+          "  git add docs\n  git commit -m \"Actualizar reporte PC3\"\n  git push\n"
+          "El link se actualiza solo uno o dos minutos después del push.")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="pc3", description="Ratios financieros PC3: Yahoo Finanzas -> KPI, DuPont y tablas.")
     sub = ap.add_subparsers(dest="comando", required=True)
@@ -99,7 +116,8 @@ def main(argv=None):
                    help="auto: año fiscal 2026 cerrado si existe, si no TTM. ttm: siempre últimos 12 meses.")
 
     for nombre, ayuda in (("calcular", "Calcula ratios, sector, líder, KPI y genera los reportes."),
-                          ("todo", "descargar + calcular.")):
+                          ("todo", "descargar + calcular."),
+                          ("publicar", "Genera la página web en docs/ para compartirla con GitHub Pages.")):
         c = sub.add_parser(nombre, help=ayuda)
         c.add_argument("--empresa", default=config.EMPRESA_FOCO, help="Empresa foco (ticker). Por defecto INTC.")
         c.add_argument("--periodos", nargs="*", type=int, help="Periodos del reporte (por defecto 2023-2026).")
@@ -120,6 +138,8 @@ def main(argv=None):
     if args.comando == "todo":
         rc = cmd_descargar(args)
         return rc or cmd_calcular(args)
+    if args.comando == "publicar":
+        return cmd_publicar(args)
     if args.comando == "plantilla":
         creada = datos.crear_plantilla_ajustes()
         print(("Creada: " if creada else "Ya existe: ") + str(datos.ARCH_AJUSTES))

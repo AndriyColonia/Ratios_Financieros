@@ -67,6 +67,18 @@ python ejecutar.py descargar --modo-2026 ttm
 - `--empresa` cambia la empresa foco (sirve para otros grupos).
 - `--modo-2026 ttm` fuerza 2026 = últimos 12 meses para todas las empresas.
 
+## Compartir el reporte con un link (sin Python)
+
+```bash
+python ejecutar.py publicar
+```
+
+Genera la página en `docs/` (`index.html` + Excel + guion + gráficos). Súbela con
+`git add docs`, `git commit` y `git push`. GitHub Pages la publica en
+`https://<usuario>.github.io/<repositorio>/`, que se abre en cualquier navegador o celular.
+La primera vez hay que activar Pages en GitHub: **Settings → Pages → Source: Deploy from a branch →**
+rama del proyecto y carpeta **/docs** → Save.
+
 ## Cómo trabaja el equipo con los datos
 
 1. Una persona corre `python ejecutar.py descargar` y sube `datos/estados_financieros.xlsx` al repo.

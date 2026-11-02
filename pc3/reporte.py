@@ -204,7 +204,9 @@ def exportar_html(ruta: Path, dir_graf: Path, foco, periodos, tsl, lista_kpis, f
               f"{e(', '.join(config.EMPRESAS.values()))}) y al líder de cada ratio. Periodos "
               f"{e(', '.join(map(str, periodos)))}. Generado el {dt.date.today().isoformat()}.</p>",
               "<nav><a href='#kpi'>KPI</a><a href='#ratios'>Ratios</a><a href='#dupont'>DuPont</a>"
-              "<a href='#empresas'>Las 9 empresas</a><a href='#notas'>Notas</a></nav>"]
+              "<a href='#empresas'>Las 9 empresas</a><a href='#notas'>Notas</a>"
+              f"<a href='PC3_{e(foco)}.xlsx' download>Descargar Excel</a>"
+              f"<a href='PC3_{e(foco)}_guion.md' download>Descargar guion</a></nav>"]
 
     # Conclusiones por familia
     partes.append("<h2 id='kpi'>KPI: ¿cómo está la empresa?</h2><div class='grid'>")
