@@ -12,8 +12,8 @@ Generado el 2026-11-02. Periodos: 2023, 2024, 2025, 2026. Plantilla de 3 frases 
 *¿Es líquida?* **Fortaleza**
 
 1. Mide cuántos dólares de activo corriente tiene la empresa por cada dólar que debe a corto plazo.
-2. En 2026, Intel registra 1.60x, peor que el sector (2.41x); el líder es NVIDIA con 4.59x. Ocupa el puesto 7 de 9.
-3. Sí. Cubre 1.60 veces sus deudas de corto plazo (sector: 2.41x). Entre 2023 y 2026 mejoró (1.54x → 1.60x).
+2. En 2026, Intel registra 160.40 %, peor que el sector (240.58 %); el líder es NVIDIA con 458.89 %. Ocupa el puesto 7 de 9.
+3. Sí. Cubre 1.60 veces sus deudas de corto plazo (sector: 240.58 %). Entre 2023 y 2026 mejoró (154.24 % → 160.40 %).
 
 ### Prueba ácida (reserva, no entra en la tabla del profesor)
 
@@ -21,8 +21,8 @@ Generado el 2026-11-02. Periodos: 2023, 2024, 2025, 2026. Plantilla de 3 frases 
 *¿Puede pagar sin vender inventario?* **Fortaleza**
 
 1. Mide la liquidez sin contar el inventario, que es el activo corriente más difícil de convertir en caja.
-2. En 2026, Intel registra 1.25x, peor que el sector (1.87x); el líder es NVIDIA con 3.85x. Ocupa el puesto 7 de 9.
-3. Sí. Aun sin vender inventario cubre 1.25 veces su pasivo corriente. Entre 2023 y 2026 mejoró (1.15x → 1.25x).
+2. En 2026, Intel registra 125.37 %, peor que el sector (187.04 %); el líder es NVIDIA con 385.50 %. Ocupa el puesto 7 de 9.
+3. Sí. Aun sin vender inventario cubre 1.25 veces su pasivo corriente. Entre 2023 y 2026 mejoró (114.58 % → 125.37 %).
 
 ### Capital de trabajo
 
@@ -43,8 +43,8 @@ Generado el 2026-11-02. Periodos: 2023, 2024, 2025, 2026. Plantilla de 3 frases 
 *¿Depende mucho de la deuda?* **Fortaleza**
 
 1. Mide cuántos dólares de terceros financian la empresa por cada dólar de los accionistas.
-2. En 2026, Intel registra 0.96x, en línea con el sector (1.02x); el líder es AMD con 0.26x. Ocupa el puesto 6 de 9.
-3. Moderadamente: debe US$ 0.96 por cada US$ 1 de patrimonio; usa más capital propio que deuda (sector: 1.02x). Entre 2023 y 2026 empeoró (0.74x → 0.96x).
+2. En 2026, Intel registra 96.27 %, en línea con el sector (101.87 %); el líder es AMD con 25.65 %. Ocupa el puesto 6 de 9.
+3. Moderadamente: debe US$ 0.96 por cada US$ 1 de patrimonio; usa más capital propio que deuda (sector: 101.87 %). Entre 2023 y 2026 empeoró (74.21 % → 96.27 %).
 
 ### Cobertura de deuda (Deuda/EBITDA)
 
