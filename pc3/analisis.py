@@ -383,3 +383,56 @@ def dupont(df: pd.DataFrame, foco: str, periodos) -> tuple[pd.DataFrame, dict]:
             txt += f" {nombre(foco)} es el líder del sector en ROE."
         textos[p] = txt.strip()
     return pd.DataFrame(filas), textos
+
+
+# ---------------------------------------------------------------------------
+# Brecha del último periodo (2026 TTM) frente al sector y al líder
+# ---------------------------------------------------------------------------
+def etiqueta_periodo(p) -> str:
+    return f"{p} TTM" if int(p) == config.ANIO_TTM else str(p)
+
+
+def brecha(v, ref, unidad: str, mejor: str):
+    """Devuelve (texto, a_favor) o (None, None). En ratios en % la brecha va en
+    puntos porcentuales (p.p.); en el resto, en % sobre la referencia."""
+    if _nan(v) or _nan(ref):
+        return None, None
+    if unidad == "%":
+        dif = v - ref
+        texto = f"{abs(dif):,.2f} p.p."
+    else:
+        if ref == 0:
+            return None, None
+        dif = (v - ref) / abs(ref) * 100
+        texto = f"{abs(dif):,.2f} %"
+    if abs(dif) < 0.005:
+        return "igual", None
+    a_favor = dif > 0 if mejor == "alto" else dif < 0
+    return texto, a_favor
+
+
+def nota_brecha(tsl: pd.DataFrame, ratio: str, foco: str, periodo: int) -> str:
+    m = meta(ratio)
+    f = tsl[(tsl.ratio == ratio) & (tsl.periodo == periodo)]
+    if f.empty:
+        return ""
+    f = f.iloc[0]
+    nom = nombre(foco)
+    inicio = f"Nota {etiqueta_periodo(periodo)}: "
+    if f.foco_ns:
+        return inicio + f"el ratio de {nom} no es significativo (n.s.), no se puede comparar."
+
+    def parte(ref, contra):
+        texto, a_favor = brecha(f.foco, ref, m["unidad"], m["mejor"])
+        if texto is None:
+            return f"sin dato frente {contra}"
+        if texto == "igual":
+            return f"igual frente {contra}"
+        return f"{texto} {'a favor' if a_favor else 'en contra'} frente {contra}"
+
+    txt = inicio + f"{nom} está {parte(f.sector, 'al sector')}"
+    if f.lider_ticker == foco:
+        txt += " y es el líder del sector."
+    else:
+        txt += f" y {parte(f.lider_valor, f'al líder ({f.lider_nombre})')}."
+    return txt

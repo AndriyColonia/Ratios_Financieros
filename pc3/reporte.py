@@ -17,22 +17,40 @@ RELLENO_ESTADO = {"bueno": "D9F2E6", "regular": "FFF1CC", "malo": "FADBD8", "ns"
 # ---------------------------------------------------------------------------
 # Excel
 # ---------------------------------------------------------------------------
-def _bloques_tablas(tsl: pd.DataFrame, foco: str, periodos) -> list[tuple[str, pd.DataFrame]]:
-    bloques = []
-    for ratio in list(config.RATIOS):
-        sub = tsl[tsl.ratio == ratio].set_index("periodo").reindex(periodos)
-        m = analisis.meta(ratio)
-        filas = {
-            analisis.nombre(foco): [analisis.fmt(v, m["unidad"], ns) for v, ns in zip(sub.foco, sub.foco_ns)],
-            "Sector (promedio)": [analisis.fmt(v, m["unidad"]) for v in sub.sector],
-            "Líder (valor)": [analisis.fmt(v, m["unidad"]) for v in sub.lider_valor],
-            "Líder (empresa)": list(sub.lider_nombre.fillna("s/d")),
-            f"Puesto de {analisis.nombre(foco)}": [f"{int(p)} de {int(n)}" if pd.notna(p) else "s/d"
-                                                   for p, n in zip(sub.puesto, sub.n_empresas)],
-        }
-        bloques.append((f"{m['nombre']}  —  {m['formula']}",
-                        pd.DataFrame(filas, index=[str(p) for p in periodos]).T))
-    return bloques
+def _filas_pc3(tsl: pd.DataFrame, ratio: str, foco: str, periodos) -> list[dict]:
+    """Años en filas: Año | Empresa | Líder (valor + empresa) | Sector | Puesto."""
+    m = analisis.meta(ratio)
+    sub = tsl[tsl.ratio == ratio].set_index("periodo").reindex(periodos)
+    filas = []
+    for p in periodos:
+        r = sub.loc[p]
+        filas.append(dict(
+            anio=analisis.etiqueta_periodo(p),
+            foco=analisis.fmt(r.foco, m["unidad"], bool(r.foco_ns) if pd.notna(r.foco_ns) else False),
+            lider=analisis.fmt(r.lider_valor, m["unidad"]),
+            lider_empresa=r.lider_nombre if isinstance(r.lider_nombre, str) else "s/d",
+            sector=analisis.fmt(r.sector, m["unidad"]),
+            puesto=f"{int(r.puesto)} de {int(r.n_empresas)}" if pd.notna(r.puesto) else "s/d",
+        ))
+    return filas
+
+
+NOTA_ASTERISCO = "* Líder: mejor valor de las 9 empresas. Sector: promedio de las 9 empresas."
+
+
+def _tabla_pc3_html(tsl, ratio, foco, periodos) -> str:
+    e = html.escape
+    nom = analisis.nombre(foco)
+    filas = "".join(
+        f"<tr><th scope='row'>{e(f['anio'])}</th><td class='emp'>{e(f['foco'])}</td>"
+        f"<td>{e(f['lider'])}<small>({e(f['lider_empresa'])})</small></td>"
+        f"<td>{e(f['sector'])}</td><td class='puesto'>{e(f['puesto'])}</td></tr>"
+        for f in _filas_pc3(tsl, ratio, foco, periodos))
+    nota = analisis.nota_brecha(tsl, ratio, foco, periodos[-1])
+    return (f"<div class='pc3'><div class='pc3-titulo'>{e(nom.upper())} VS LÍDER VS SECTOR</div>"
+            f"<div class='scroll'><table><thead><tr><th>Año</th><th>{e(nom.upper())}</th><th>LÍDER*</th>"
+            f"<th>SECTOR*</th><th>PUESTO</th></tr></thead><tbody>{filas}</tbody></table></div>"
+            f"<p class='pc3-nota'><b>{e(nota)}</b><br>{e(NOTA_ASTERISCO)}</p></div>")
 
 
 def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, tabla_dp, textos_dp,
@@ -58,14 +76,32 @@ def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, ta
         for i, k in enumerate(lista_kpis, start=2):
             ws.cell(i, 4).fill = PatternFill("solid", fgColor=RELLENO_ESTADO[k["estado"]])
 
-        # 3. Tablas PC3 (formato tabla del profesor)
-        fila = 0
-        for titulo, bloque in _bloques_tablas(tsl, foco, periodos):
-            pd.DataFrame([[titulo]]).to_excel(w, sheet_name="Tablas PC3", startrow=fila, index=False, header=False)
-            bloque.to_excel(w, sheet_name="Tablas PC3", startrow=fila + 1)
-            ws = w.sheets["Tablas PC3"]
-            ws.cell(fila + 1, 1).font = Font(bold=True, size=12)
-            fila += len(bloque) + 4
+        # 3. Tablas PC3 (Año | Empresa | Líder* | Sector* | Puesto) + nota de brecha
+        ws = w.book.create_sheet("Tablas PC3")
+        azul, celeste = PatternFill("solid", fgColor="2563EB"), PatternFill("solid", fgColor="E8EFFD")
+        centro = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        nom = analisis.nombre(foco)
+        fila = 1
+        for ratio in config.RATIOS:
+            m = analisis.meta(ratio)
+            ws.cell(fila, 1, f"{m['nombre']}: {nom.upper()} VS LÍDER VS SECTOR").font = Font(bold=True, size=12, color="2563EB")
+            ws.cell(fila + 1, 1, m["formula"]).font = Font(italic=True, color="52514E")
+            fila += 2
+            for j, cab in enumerate(["Año", nom.upper(), "LÍDER*", "SECTOR*", "PUESTO"], start=1):
+                c = ws.cell(fila, j, cab)
+                c.fill, c.font, c.alignment = azul, Font(bold=True, color="FFFFFF"), centro
+            for f in _filas_pc3(tsl, ratio, foco, periodos):
+                fila += 1
+                valores = [f["anio"], f["foco"], f"{f['lider']}\n({f['lider_empresa']})", f["sector"], f["puesto"]]
+                for j, v in enumerate(valores, start=1):
+                    c = ws.cell(fila, j, v)
+                    c.alignment = centro
+                ws.cell(fila, 1).fill, ws.cell(fila, 1).font = celeste, Font(bold=True)
+                ws.cell(fila, 2).font = Font(bold=True, color="2563EB")
+                ws.row_dimensions[fila].height = 32
+            ws.cell(fila + 1, 1, analisis.nota_brecha(tsl, ratio, foco, periodos[-1])).font = Font(bold=True)
+            ws.cell(fila + 2, 1, NOTA_ASTERISCO).font = Font(italic=True, color="52514E")
+            fila += 5
 
         # 4. DuPont
         dp = tabla_dp.copy()
@@ -103,6 +139,10 @@ def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, ta
         pd.DataFrame(notas, columns=["Tipo", "Empresa", "Nota"]).to_excel(w, sheet_name="Notas", index=False)
 
         for ws in w.book.worksheets:
+            if ws.title == "Tablas PC3":
+                for letra, ancho in zip("ABCDE", (14, 16, 20, 14, 12)):
+                    ws.column_dimensions[letra].width = ancho
+                continue
             for col in ws.columns:
                 largo = max(len(str(c.value)) if c.value is not None else 0 for c in col)
                 ws.column_dimensions[col[0].column_letter].width = min(max(12, largo + 2), 70)
@@ -151,10 +191,11 @@ def exportar_guion(ruta: Path, foco, periodos, lista_kpis, familias, textos_dp):
 CSS = """
 :root{--bg:#f7f7f5;--card:#ffffff;--txt:#0b0b0b;--txt2:#52514e;--borde:#e5e4df;--foco:#2a78d6;
 --bueno:#0a7a3e;--bueno-bg:#e3f4ea;--regular:#8a5a00;--regular-bg:#fff3d6;--malo:#b42318;--malo-bg:#fde7e5;
---sd:#52514e;--sd-bg:#eeeeec}
+--sd:#52514e;--sd-bg:#eeeeec;--pc3-azul:#2563eb;--pc3-celeste:#e8effd;--pc3-borde:#d6dbe6}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#141413;--card:#1f1f1e;--txt:#f0efec;
 --txt2:#c3c2b7;--borde:#3a3936;--foco:#3987e5;--bueno:#6fd39b;--bueno-bg:#16301f;--regular:#f2c46b;
---regular-bg:#33280f;--malo:#f39b92;--malo-bg:#3a1a17;--sd:#c3c2b7;--sd-bg:#2a2a28}}
+--regular-bg:#33280f;--malo:#f39b92;--malo-bg:#3a1a17;--sd:#c3c2b7;--sd-bg:#2a2a28;--pc3-azul:#4f8bf5;
+--pc3-celeste:#1c2a44;--pc3-borde:#3a3936}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);
 font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 main{max-width:1180px;margin:0 auto;padding:24px 16px 64px}
@@ -175,6 +216,17 @@ th:first-child,td:first-child{text-align:left}thead th{color:var(--txt2);font-we
 tr.foco td{font-weight:700;color:var(--foco)}.scroll{overflow-x:auto}
 .ratio{margin:18px 0}.ratio img{width:100%;height:auto;border-radius:8px;border:1px solid var(--borde);background:#fff}
 .dos{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media (max-width:760px){.dos{grid-template-columns:1fr}}
+.pc3{max-width:620px;margin:12px 0}.pc3-titulo{color:var(--pc3-azul);font-weight:800;font-size:14px;
+letter-spacing:.02em;margin-bottom:6px}
+.pc3 table{border-collapse:separate;border-spacing:0;border:1px solid var(--pc3-borde);border-radius:8px;overflow:hidden}
+.pc3 th,.pc3 td{text-align:center;border-bottom:1px solid var(--pc3-borde);border-right:1px solid var(--pc3-borde);
+padding:10px 12px;white-space:nowrap}
+.pc3 tr>:last-child{border-right:none}.pc3 tbody tr:last-child>*{border-bottom:none}
+.pc3 thead th{background:var(--pc3-azul);color:#fff;font-weight:700;text-align:center}
+.pc3 tbody th{background:var(--pc3-celeste);color:var(--txt);font-weight:700;text-align:center}
+.pc3 td.emp{color:var(--pc3-azul);font-weight:700;font-size:16px}
+.pc3 td small{display:block;font-size:11px;color:var(--txt2)}.pc3 td.puesto{color:var(--txt2)}
+.pc3-nota{font-size:13px;color:var(--txt2);margin:8px 0 0}.pc3-nota b{color:var(--txt)}
 ol{padding-left:20px;margin:8px 0}details summary{cursor:pointer;color:var(--foco);margin-top:8px}
 """
 
@@ -231,19 +283,13 @@ def exportar_html(ruta: Path, dir_graf: Path, foco, periodos, tsl, lista_kpis, f
 
     # Ratios: tabla + gráficos + 3 frases
     partes.append("<h2 id='ratios'>Ratios: tabla, gráfico y guion de 3 frases</h2>")
-    bloques = dict(_bloques_tablas(tsl, foco, periodos))
-    for (titulo, bloque), k in zip(bloques.items(), lista_kpis):
-        filas_html = "".join(
-            f"<tr class='{'foco' if i == 0 else ''}'><td>{e(str(idx))}</td>"
-            + "".join(f"<td>{e(str(v))}</td>" for v in fila) + "</tr>"
-            for i, (idx, fila) in enumerate(bloque.iterrows()))
-        cab = "".join(f"<th>{e(c)}</th>" for c in bloque.columns)
+    for k in lista_kpis:
         img_ratio = _img(dir_graf / (k["ratio"] + ".png"))
         img_rank = _img(dir_graf / (k["ratio"] + "_ranking.png"))
         partes.append(
             f"<section class='ratio card' id='{k['ratio']}'><h3>{e(k['nombre'])} {_badge(k['estado'])}</h3>"
             f"<div class='muted'>{e(k['formula'])}</div>"
-            f"<div class='scroll'><table><thead><tr><th></th>{cab}</tr></thead><tbody>{filas_html}</tbody></table></div>"
+            f"{_tabla_pc3_html(tsl, k['ratio'], foco, periodos)}"
             f"<ol><li>{e(k['frase_mide'])}</li><li>{e(k['frase_posicion'] or 'Sin datos para comparar.')}</li>"
             f"<li>{e(k['frase_significa'].strip())}</li></ol>"
             f"<div class='dos'>{img_ratio}{img_rank}</div></section>")
