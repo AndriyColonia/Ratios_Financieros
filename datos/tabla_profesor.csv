@@ -1,0 +1,25 @@
+# Sector y líder oficiales (tabla del profesor, UNI_26-2_Sist_y_finanzas-ratios.pdf).
+# Solo se usa con:  python ejecutar.py calcular --tabla-profesor
+# Completa las filas que falten. Si lider_valor está vacío se toma el valor calculado de esa empresa.
+# Valores ya validados por el grupo (ver PC3_contexto). Días en días, márgenes en %.
+ratio,periodo,sector,lider_empresa,lider_valor
+dias_pago,2023,52.96,Lam Research,28.25
+dias_pago,2024,51.87,Lam Research,25.35
+dias_pago,2025,54.37,Lam Research,28.33
+dias_pago,2026,57.21,Broadcom,29.73
+ciclo_efectivo,2023,145.92,Cisco,53.92
+ciclo_efectivo,2024,155.65,Broadcom,34.31
+ciclo_efectivo,2025,137.46,Intel,32.56
+ciclo_efectivo,2026,138.28,Intel,43.64
+margen_bruto,2023,53.07,Broadcom,68.93
+margen_bruto,2024,54.34,NVIDIA,72.72
+margen_bruto,2025,56.23,NVIDIA,74.99
+margen_bruto,2026,56.90,NVIDIA,71.07
+dias_inventario,2023,138.86,Cisco,
+dias_inventario,2024,151.92,Broadcom,
+dias_inventario,2025,141.10,Broadcom,
+dias_inventario,2026,141.72,Broadcom,
+dias_cobro,2023,60.03,Intel,
+dias_cobro,2024,55.59,Intel,
+dias_cobro,2025,50.73,Intel,
+dias_cobro,2026,53.76,Intel,

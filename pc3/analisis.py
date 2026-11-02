@@ -1,0 +1,385 @@
+"""Sector, líder, lectura de cada KPI (¿es líquida o no y por qué?) y DuPont."""
+from __future__ import annotations
+
+import math
+
+import pandas as pd
+
+from . import config
+
+NOMBRE_A_TICKER = {v.lower(): k for k, v in config.EMPRESAS.items()}
+ESTADOS = {"bueno": "Fortaleza", "regular": "Atención", "malo": "Debilidad", "ns": "No significativo",
+           "sd": "Sin datos"}
+
+
+# ---------------------------------------------------------------------------
+# Formato
+# ---------------------------------------------------------------------------
+def meta(ratio: str) -> dict:
+    return config.RATIOS.get(ratio) or config.DUPONT[ratio]
+
+
+def fmt(valor, unidad: str, ns: bool = False) -> str:
+    if ns:
+        return "n.s."
+    if valor is None or (isinstance(valor, float) and math.isnan(valor)):
+        return "s/d"
+    if unidad == "%":
+        return f"{valor:,.2f} %"
+    if unidad == "días":
+        return f"{valor:,.2f} días"
+    if unidad == "M USD":
+        return f"{valor:,.0f} M USD"
+    if unidad == "años":
+        return f"{valor:,.2f} años"
+    return f"{valor:,.2f}x"
+
+
+def nombre(tk) -> str:
+    return config.EMPRESAS.get(tk, tk) if isinstance(tk, str) else "s/d"
+
+
+def _nan(x) -> bool:
+    return x is None or (isinstance(x, float) and math.isnan(x))
+
+
+# ---------------------------------------------------------------------------
+# Sector y líder
+# ---------------------------------------------------------------------------
+def tabla_sector_lider(df: pd.DataFrame, foco: str, periodos, profesor: pd.DataFrame | None = None):
+    """Una fila por (ratio, periodo) con foco, sector (promedio de las empresas
+    con dato), líder (mejor valor según el ratio) y puesto del foco."""
+    filas = []
+    ratios = list(config.RATIOS) + ["rotacion_activos", "apalancamiento", "roe_dupont"]
+    for ratio in ratios:
+        m = meta(ratio)
+        for p in periodos:
+            sub = df[(df.ratio == ratio) & (df.periodo == p)]
+            validos = sub.dropna(subset=["valor"])
+            fila_foco = sub[sub.ticker == foco]
+            v_foco = fila_foco.valor.iloc[0] if len(fila_foco) else math.nan
+            ns_foco = bool(fila_foco.ns.iloc[0]) if len(fila_foco) else False
+            fila = dict(ratio=ratio, nombre=m["nombre"], familia=m.get("familia", "DuPont"),
+                        unidad=m["unidad"], periodo=p, foco=v_foco, foco_ns=ns_foco,
+                        sector=validos.valor.mean() if len(validos) else math.nan,
+                        n_empresas=len(validos), lider_valor=math.nan, lider_ticker=None,
+                        puesto=None, fuente="calculado")
+            if len(validos):
+                orden = validos.sort_values("valor", ascending=(m["mejor"] == "bajo"))
+                fila["lider_valor"] = orden.valor.iloc[0]
+                fila["lider_ticker"] = orden.ticker.iloc[0]
+                if foco in list(orden.ticker):
+                    fila["puesto"] = list(orden.ticker).index(foco) + 1
+            filas.append(fila)
+    out = pd.DataFrame(filas)
+    if profesor is not None:
+        out = _aplicar_profesor(out, df, profesor)
+    out["lider_nombre"] = out.lider_ticker.map(nombre)
+    return out
+
+
+def _aplicar_profesor(out, df, prof):
+    for _, r in prof.iterrows():
+        mask = (out.ratio == r["ratio"]) & (out.periodo == int(r["periodo"]))
+        if not mask.any():
+            continue
+        if pd.notna(r.get("sector")):
+            out.loc[mask, "sector"] = float(r["sector"])
+            out.loc[mask, "fuente"] = "tabla del profesor"
+        emp = r.get("lider_empresa")
+        if isinstance(emp, str) and emp.strip():
+            tk = NOMBRE_A_TICKER.get(emp.strip().lower(), emp.strip().upper())
+            out.loc[mask, "lider_ticker"] = tk
+            valor = r.get("lider_valor")
+            if pd.isna(valor):
+                calc = df[(df.ratio == r["ratio"]) & (df.periodo == int(r["periodo"])) & (df.ticker == tk)]
+                valor = calc.valor.iloc[0] if len(calc) else math.nan
+            out.loc[mask, "lider_valor"] = float(valor)
+            out.loc[mask, "fuente"] = "tabla del profesor"
+    return out
+
+
+def matriz_empresas(df: pd.DataFrame, ratio: str, periodos) -> pd.DataFrame:
+    sub = df[(df.ratio == ratio) & (df.periodo.isin(periodos))]
+    m = sub.pivot(index="ticker", columns="periodo", values="valor")
+    m.index = [nombre(t) for t in m.index]
+    return m
+
+
+# ---------------------------------------------------------------------------
+# Veredicto de cada KPI
+# ---------------------------------------------------------------------------
+def comparar(v, s, mejor):
+    """'mejor' / 'similar' / 'peor' que el sector (tolerancia ±10 %)."""
+    if _nan(v) or _nan(s):
+        return None
+    if s == 0:
+        dif = v - s
+    else:
+        dif = (v - s) / abs(s)
+    if mejor == "bajo":
+        dif = -dif
+    if dif > config.TOLERANCIA_SECTOR:
+        return "mejor"
+    if dif < -config.TOLERANCIA_SECTOR:
+        return "peor"
+    return "similar"
+
+
+def veredicto(ratio: str, v, s, ns: bool = False) -> tuple[str, str]:
+    """Devuelve (estado, respuesta corta a la pregunta del KPI)."""
+    m = meta(ratio)
+    rel = comparar(v, s, m["mejor"])
+    s_txt = fmt(s, m["unidad"])
+
+    if ns:
+        if ratio == "cobertura_deuda":
+            return "malo", ("No se puede medir: el EBITDA es negativo, la operación no genera caja para "
+                            "pagar deuda. Es una señal de riesgo.")
+        return "malo", "No significativo: el patrimonio es negativo o cero, señal de alto riesgo."
+    if _nan(v):
+        return "sd", "Sin datos suficientes para calcularlo; complétalo en datos/ajustes_manuales.xlsx."
+
+    if ratio == "liquidez_corriente":
+        if v < 1:
+            return "malo", (f"No. Por cada US$ 1 que debe a corto plazo solo tiene US$ {v:.2f} de activo "
+                            "corriente; no alcanza a cubrir sus obligaciones de corto plazo.")
+        if v < 1.5:
+            return "regular", (f"Sí, pero ajustada: cubre {v:.2f} veces su pasivo corriente, con poco margen "
+                               f"de holgura (sector: {s_txt}).")
+        if v <= 3:
+            return "bueno", (f"Sí. Cubre {v:.2f} veces sus deudas de corto plazo (sector: {s_txt}).")
+        return "bueno", (f"Sí, muy líquida ({v:.2f} veces), aunque un nivel tan alto puede indicar dinero "
+                         f"ocioso que no se está invirtiendo (sector: {s_txt}).")
+
+    if ratio == "prueba_acida":
+        if v < 0.8:
+            return "malo", f"No. Sin vender inventario solo cubre {v:.2f} veces su pasivo corriente."
+        if v < 1:
+            return "regular", (f"Casi: sin inventario cubre {v:.2f} veces su pasivo corriente; depende en "
+                               "parte de vender su inventario.")
+        return "bueno", f"Sí. Aun sin vender inventario cubre {v:.2f} veces su pasivo corriente."
+
+    if ratio == "capital_trabajo":
+        if v <= 0:
+            return "malo", (f"No. Su pasivo corriente supera al activo corriente en {fmt(-v, 'M USD')}; "
+                            "tiene un déficit de corto plazo.")
+        return "bueno", (f"Sí. Le quedan {fmt(v, 'M USD')} después de cubrir todas sus deudas de corto plazo "
+                         f"(promedio del sector: {s_txt}).")
+
+    if ratio == "endeudamiento":
+        if v < 0.5:
+            return "bueno", f"No. Por cada US$ 1 de patrimonio debe US$ {v:.2f}; se financia sobre todo con capital propio."
+        if v < 1:
+            return "bueno", (f"Moderadamente: debe US$ {v:.2f} por cada US$ 1 de patrimonio; usa más capital "
+                             f"propio que deuda (sector: {s_txt}).")
+        if v < 2:
+            return "regular", (f"Sí. Debe US$ {v:.2f} por cada US$ 1 de patrimonio: los terceros financian más "
+                               f"que los accionistas (sector: {s_txt}).")
+        return "malo", (f"Sí, mucho: debe US$ {v:.2f} por cada US$ 1 de patrimonio; alta dependencia de "
+                        f"terceros (sector: {s_txt}).")
+
+    if ratio == "cobertura_deuda":
+        if v < 1:
+            return "bueno", f"Sí, con holgura: pagaría toda su deuda con {v:.2f} años de EBITDA (sector: {s_txt})."
+        if v <= 3:
+            return "bueno", f"Sí. Necesitaría {v:.2f} años de EBITDA para pagar su deuda, nivel sano (≤ 3)."
+        if v <= 4:
+            return "regular", f"Con esfuerzo: necesitaría {v:.2f} años de EBITDA, nivel exigente (sector: {s_txt})."
+        return "malo", (f"Con dificultad: necesitaría {v:.2f} años de EBITDA para pagar su deuda (> 4 años es "
+                        f"alto riesgo; sector: {s_txt}).")
+
+    if ratio in ("margen_bruto", "margen_operativo", "margen_neto", "margen_ebitda", "roa", "roe") and v < 0:
+        textos = {
+            "margen_bruto": "No. Vende por debajo de su costo de fabricación.",
+            "margen_operativo": f"No. Su operación pierde {abs(v):.2f} centavos por cada dólar vendido.",
+            "margen_neto": f"No. Pierde {abs(v):.2f} centavos por cada dólar vendido.",
+            "margen_ebitda": "No. Su operación consume caja en vez de generarla.",
+            "roa": f"No. Sus activos destruyen valor: pierde {abs(v):.2f} centavos por cada dólar de activo.",
+            "roe": f"No. Destruye valor para el accionista: pierde {abs(v):.2f} centavos por cada dólar de patrimonio.",
+        }
+        return "malo", textos[ratio] + f" (sector: {s_txt})."
+
+    # Ratios que solo se leen contra el sector
+    unidad = m["unidad"]
+    v_txt = fmt(v, unidad)
+    textos = {
+        "dias_inventario": {
+            "mejor": f"Sí. Su producto pasa {v_txt} en almacén frente a {s_txt} del sector: rota más rápido.",
+            "similar": f"Como el sector: {v_txt} frente a {s_txt}.",
+            "peor": f"No. Su producto pasa {v_txt} en almacén frente a {s_txt} del sector: inventario más lento.",
+        },
+        "dias_cobro": {
+            "mejor": f"Sí. Cobra en {v_txt} frente a {s_txt} del sector: convierte sus ventas en caja más rápido.",
+            "similar": f"Como el sector: {v_txt} frente a {s_txt}.",
+            "peor": f"No. Tarda {v_txt} en cobrar frente a {s_txt} del sector: financia a sus clientes.",
+        },
+        "dias_pago": {
+            "mejor": (f"Paga en {v_txt}, más rápido que el sector ({s_txt}): no depende de estirar el plazo "
+                      "a sus proveedores."),
+            "similar": f"Como el sector: paga en {v_txt} frente a {s_txt}.",
+            "peor": (f"Paga en {v_txt}, más lento que el sector ({s_txt}): se financia con sus proveedores, lo "
+                     "que le da caja, pero un plazo tan alto puede reflejar presión de liquidez."),
+        },
+        "ciclo_efectivo": {
+            "mejor": f"Pocos: {v_txt} frente a {s_txt} del sector; necesita menos caja propia para operar.",
+            "similar": f"Como el sector: {v_txt} frente a {s_txt}.",
+            "peor": f"Muchos: {v_txt} frente a {s_txt} del sector; necesita más caja propia para operar.",
+        },
+    }
+    if ratio in textos:
+        estado = {"mejor": "bueno", "similar": "regular", "peor": "malo"}[rel] if rel else "sd"
+        if ratio == "dias_pago" and rel == "peor":
+            estado = "regular"
+        txt = textos[ratio].get(rel, "Sin dato del sector para comparar.")
+        if ratio == "ciclo_efectivo" and v < 0:
+            txt += " Su ciclo es negativo: los proveedores financian toda su operación."
+        return estado, txt
+
+    # Márgenes, ROA y ROE positivos
+    if rel == "mejor":
+        return "bueno", f"Sí, y por encima del sector: {v_txt} frente a {s_txt}."
+    if rel == "similar":
+        return "regular", f"Sí, en línea con el sector: {v_txt} frente a {s_txt}."
+    if rel == "peor":
+        return "regular" if v > 0 else "malo", f"Sí, pero por debajo del sector: {v_txt} frente a {s_txt}."
+    return "sd", f"{v_txt}; sin dato del sector para comparar."
+
+
+# ---------------------------------------------------------------------------
+# KPI con las 3 frases para exponer
+# ---------------------------------------------------------------------------
+def _tendencia(serie: list, mejor: str, unidad: str) -> str:
+    pares = [(p, v) for p, v in serie if not _nan(v)]
+    if len(pares) < 2:
+        return ""
+    (p0, v0), (p1, v1) = pares[0], pares[-1]
+    sube = v1 > v0
+    mejora = sube if mejor == "alto" else not sube
+    if math.isclose(v0, v1, rel_tol=0.02, abs_tol=1e-9):
+        return f"Entre {p0} y {p1} se mantuvo estable ({fmt(v0, unidad)} → {fmt(v1, unidad)})."
+    return (f"Entre {p0} y {p1} {'mejoró' if mejora else 'empeoró'} "
+            f"({fmt(v0, unidad)} → {fmt(v1, unidad)}).")
+
+
+def kpis(tsl: pd.DataFrame, foco: str, periodos) -> list[dict]:
+    out = []
+    nom_foco = nombre(foco)
+    for ratio, m in config.RATIOS.items():
+        sub = tsl[tsl.ratio == ratio].set_index("periodo").reindex(periodos)
+        ultimo = sub.dropna(subset=["foco"]).index.max() if sub.foco.notna().any() else periodos[-1]
+        if pd.isna(ultimo):
+            ultimo = periodos[-1]
+        f = sub.loc[ultimo]
+        ns = bool(f.foco_ns) if pd.notna(f.foco_ns) else False
+        estado, respuesta = veredicto(ratio, f.foco, f.sector, ns)
+
+        posicion = ""
+        if not _nan(f.foco) and not _nan(f.sector):
+            rel = comparar(f.foco, f.sector, m["mejor"])
+            rel_txt = {"mejor": "mejor que", "similar": "en línea con", "peor": "peor que"}[rel]
+            lider = (f"el líder es {f.lider_nombre} con {fmt(f.lider_valor, m['unidad'])}"
+                     if isinstance(f.lider_ticker, str) and f.lider_ticker != foco
+                     else f"{nom_foco} es el líder del sector")
+            puesto = f" Ocupa el puesto {int(f.puesto)} de {int(f.n_empresas)}." if pd.notna(f.puesto) else ""
+            posicion = (f"En {ultimo}, {nom_foco} registra {fmt(f.foco, m['unidad'])}, {rel_txt} el sector "
+                        f"({fmt(f.sector, m['unidad'])}); {lider}.{puesto}")
+        elif ns:
+            posicion = f"En {ultimo}, el ratio de {nom_foco} no es significativo (n.s.)."
+
+        out.append(dict(
+            ratio=ratio, nombre=m["nombre"], familia=m["familia"], unidad=m["unidad"], formula=m["formula"],
+            pregunta=m["pregunta"], reserva=m.get("reserva", False), periodo=int(ultimo),
+            estado=estado, estado_txt=ESTADOS[estado], respuesta=respuesta,
+            frase_mide=m["que_mide"], frase_posicion=posicion,
+            frase_significa=respuesta + " " + _tendencia(list(sub.foco.items()), m["mejor"], m["unidad"]),
+            serie={int(p): sub.at[p, "foco"] for p in periodos},
+        ))
+    return out
+
+
+def conclusiones_familia(lista_kpis: list[dict], foco: str) -> dict:
+    out = {}
+    for familia, pregunta in config.FAMILIAS.items():
+        ks = [k for k in lista_kpis if k["familia"] == familia and not k["reserva"] and k["estado"] != "sd"]
+        if not ks:
+            out[familia] = dict(pregunta=pregunta, estado="sd", respuesta="Sin datos.", detalle=[])
+            continue
+        n_malo = sum(k["estado"] == "malo" for k in ks)
+        n_bueno = sum(k["estado"] == "bueno" for k in ks)
+        if n_malo == 0 and n_bueno >= len(ks) / 2:
+            estado, inicio = "bueno", "Sí"
+        elif n_malo >= len(ks) / 2:
+            estado, inicio = "malo", "No"
+        else:
+            estado, inicio = "regular", "En parte"
+        partes = []
+        for est, etiqueta in (("bueno", "A favor"), ("regular", "Atención"), ("malo", "En contra")):
+            nombres = [k["nombre"] for k in ks if k["estado"] == est]
+            if nombres:
+                partes.append(f"{etiqueta}: " + ", ".join(nombres))
+        out[familia] = dict(pregunta=pregunta, estado=estado,
+                            respuesta=f"{inicio}. " + (". ".join(partes) + "." if partes else ""),
+                            detalle=[f"{k['nombre']}: {k['respuesta']}" for k in ks])
+    return out
+
+
+# ---------------------------------------------------------------------------
+# DuPont
+# ---------------------------------------------------------------------------
+COMPONENTES = ["margen_neto", "rotacion_activos", "apalancamiento"]
+
+
+def dupont(df: pd.DataFrame, foco: str, periodos) -> tuple[pd.DataFrame, dict]:
+    """Tabla DuPont (foco, promedio del sector y líder en ROE) y lectura por periodo."""
+    filas, textos = [], {}
+    for p in periodos:
+        sub = df[df.periodo == p].pivot(index="ticker", columns="ratio", values="valor")
+        if sub.empty:
+            continue
+        roe = sub["roe_dupont"].dropna()
+        lider = roe.idxmax() if len(roe) else None
+        for quien, etiqueta in ((foco, nombre(foco)), ("sector", "Promedio sector"), (lider, None)):
+            if quien is None:
+                continue
+            if quien == "sector":
+                vals = sub[COMPONENTES + ["roe_dupont"]].mean()
+            elif quien in sub.index:
+                vals = sub.loc[quien, COMPONENTES + ["roe_dupont"]]
+            else:
+                continue
+            filas.append(dict(periodo=p, quien=etiqueta or f"Líder ROE: {nombre(quien)}",
+                              **{c: vals[c] for c in COMPONENTES}, roe=vals["roe_dupont"]))
+
+        if foco not in sub.index:
+            continue
+        f = sub.loc[foco]
+        s = sub[COMPONENTES].mean()
+        if _nan(f["roe_dupont"]):
+            textos[p] = "Sin datos suficientes para la descomposición DuPont."
+            continue
+        txt = (f"ROE {fmt(f['roe_dupont'], '%')} = margen neto {fmt(f['margen_neto'], '%')} × rotación "
+               f"{fmt(f['rotacion_activos'], 'veces')} × apalancamiento {fmt(f['apalancamiento'], 'veces')}. ")
+        if f["margen_neto"] < 0:
+            txt += ("El ROE es negativo porque el margen neto es negativo: la empresa pierde dinero en cada "
+                    "venta, y la rotación y el apalancamiento solo amplifican esa pérdida. ")
+        relativos = {c: (f[c] / s[c] if s[c] and not _nan(f[c]) and s[c] > 0 else math.nan) for c in COMPONENTES}
+        validos = {c: r for c, r in relativos.items() if not _nan(r)}
+        if validos:
+            peor = min(validos, key=validos.get)
+            mejor = max(validos, key=validos.get)
+            nom = {c: config.DUPONT[c]["nombre"].lower() for c in COMPONENTES}
+            if validos[peor] < 1:
+                txt += (f"Frente al sector, su principal debilidad es el {nom[peor]} "
+                        f"({fmt(f[peor], config.DUPONT[peor]['unidad'])} vs "
+                        f"{fmt(s[peor], config.DUPONT[peor]['unidad'])}). ")
+            if validos[mejor] > 1:
+                txt += (f"Su componente más fuerte es el {nom[mejor]} "
+                        f"({fmt(f[mejor], config.DUPONT[mejor]['unidad'])} vs "
+                        f"{fmt(s[mejor], config.DUPONT[mejor]['unidad'])}).")
+        if lider and lider != foco:
+            txt += f" El líder en ROE es {nombre(lider)} con {fmt(sub.at[lider, 'roe_dupont'], '%')}."
+        elif lider == foco:
+            txt += f" {nombre(foco)} es el líder del sector en ROE."
+        textos[p] = txt.strip()
+    return pd.DataFrame(filas), textos
