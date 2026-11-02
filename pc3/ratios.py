@@ -31,10 +31,31 @@ def _div(a: float, b: float) -> float:
     return a / b
 
 
+def _ebitda(tabla: pd.DataFrame, p: int) -> float:
+    u, da = _v(tabla, "utilidad_operativa", p), _v(tabla, "dep_amort", p)
+    return math.nan if math.isnan(u) else u + (0.0 if math.isnan(da) else da)
+
+
+def _ebitda_estimado(tabla: pd.DataFrame, p: int):
+    """EBITDA positivo para Deuda/EBITDA cuando el contable es <= 0.
+    1) EBITDA normalizado de Yahoo (suma de vuelta cargas no recurrentes).
+    2) Promedio del EBITDA positivo de los años vecinos (p-1 y p+1).
+    Devuelve (valor, descripcion) o (None, None)."""
+    norm = _v(tabla, "ebitda_normalizado", p)
+    if not math.isnan(norm) and norm > 0:
+        return norm, "el EBITDA normalizado de Yahoo"
+    vecinos = [(q, _ebitda(tabla, q)) for q in (p - 1, p + 1)]
+    vecinos = [(q, e) for q, e in vecinos if not math.isnan(e) and e > 0]
+    if vecinos:
+        anios = " y ".join(str(q) for q, _ in vecinos)
+        return sum(e for _, e in vecinos) / len(vecinos), f"el promedio del EBITDA de {anios}"
+    return None, None
+
+
 def calcular_empresa(tabla: pd.DataFrame, periodos=None):
-    """Devuelve (valores: DataFrame periodo×ratio, ns: set de (periodo, ratio), notas: list)."""
+    """Devuelve (valores: DataFrame periodo×ratio, ns, est, notas). ns/est: sets de (periodo, ratio)."""
     periodos = periodos or config.PERIODOS
-    filas, ns, notas = {}, set(), []
+    filas, ns, est, notas = {}, set(), set(), []
 
     for p in periodos:
         v = lambda k: _v(tabla, k, p)  # noqa: E731
@@ -73,9 +94,17 @@ def calcular_empresa(tabla: pd.DataFrame, periodos=None):
             r["endeudamiento"] = _div(v("pasivo_total"), pat_total)
 
         deuda = v("deuda_financiera")
+        ebitda_cob = ebitda
         if not math.isnan(ebitda) and ebitda <= 0:
-            r["cobertura_deuda"] = math.nan
-            ns.add((p, "cobertura_deuda"))
+            ebitda_cob, como = _ebitda_estimado(tabla, p)
+            if ebitda_cob is None:
+                r["cobertura_deuda"] = math.nan
+                ns.add((p, "cobertura_deuda"))
+            else:
+                est.add((p, "cobertura_deuda"))
+                notas.append(f"{p}: Deuda/EBITDA estimada: el EBITDA contable fue {ebitda:,.0f} M USD (negativo); "
+                             f"se usó {como} ({ebitda_cob:,.0f} M USD).")
+                r["cobertura_deuda"] = _div(deuda, ebitda_cob)
         else:
             r["cobertura_deuda"] = _div(deuda, ebitda)
 
@@ -107,17 +136,17 @@ def calcular_empresa(tabla: pd.DataFrame, periodos=None):
 
     # sin duplicar notas
     notas = list(dict.fromkeys(notas))
-    return pd.DataFrame(filas).T.rename_axis("periodo"), ns, notas
+    return pd.DataFrame(filas).T.rename_axis("periodo"), ns, est, notas
 
 
 def calcular_todas(tablas: dict, periodos=None):
     """Devuelve (DataFrame largo con columnas ticker, periodo, ratio, valor, ns), notas por ticker."""
     registros, notas = [], {}
     for tk, tabla in tablas.items():
-        valores, ns, nt = calcular_empresa(tabla, periodos)
+        valores, ns, est, nt = calcular_empresa(tabla, periodos)
         notas[tk] = nt
         for p, fila in valores.iterrows():
             for ratio, valor in fila.items():
                 registros.append(dict(ticker=tk, periodo=int(p), ratio=ratio,
-                                      valor=valor, ns=(p, ratio) in ns))
+                                      valor=valor, ns=(p, ratio) in ns, est=(p, ratio) in est))
     return pd.DataFrame(registros), notas

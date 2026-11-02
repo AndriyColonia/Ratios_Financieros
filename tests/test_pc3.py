@@ -77,7 +77,7 @@ def tabla_ejemplo(escala=1.0, perdida=False):
 
 class TestRatios(unittest.TestCase):
     def test_formulas(self):
-        v, ns, _ = ratios.calcular_empresa(tabla_ejemplo(), [2023])
+        v, ns, _, _ = ratios.calcular_empresa(tabla_ejemplo(), [2023])
         r = v.loc[2023]
         self.assertAlmostEqual(r.liquidez_corriente, 2.0)
         self.assertAlmostEqual(r.capital_trabajo, 250)
@@ -100,14 +100,33 @@ class TestRatios(unittest.TestCase):
     def test_ebitda_negativo_es_no_significativo(self):
         t = tabla_ejemplo(perdida=True)
         t.at["dep_amort", 2023] = 10
-        v, ns, _ = ratios.calcular_empresa(t, [2023])
+        v, ns, _, _ = ratios.calcular_empresa(t, [2023])
         self.assertTrue(math.isnan(v.loc[2023].cobertura_deuda))
         self.assertIn((2023, "cobertura_deuda"), ns)
+
+    def test_ebitda_negativo_se_estima_con_normalizado(self):
+        t = tabla_ejemplo(perdida=True)
+        t.at["dep_amort", 2023] = 10                       # EBITDA contable = -40
+        t.at["ebitda_normalizado", 2023] = 300             # Yahoo: normalizado positivo
+        v, ns, est, notas = ratios.calcular_empresa(t, [2023])
+        self.assertAlmostEqual(v.loc[2023].cobertura_deuda, 600 / 300)
+        self.assertIn((2023, "cobertura_deuda"), est)
+        self.assertNotIn((2023, "cobertura_deuda"), ns)
+        self.assertTrue(any("normalizado" in n for n in notas))
+
+    def test_ebitda_negativo_se_estima_con_anios_vecinos(self):
+        t = tabla_ejemplo(perdida=True)
+        t.at["dep_amort", 2023] = 10                       # 2023: -40
+        for p, op in ((2022, 100), (2024, 200)):           # vecinos positivos: 100 y 200
+            t.at["utilidad_operativa", p], t.at["dep_amort", p] = op, 0
+        v, _, est, notas = ratios.calcular_empresa(t, [2023])
+        self.assertAlmostEqual(v.loc[2023].cobertura_deuda, 600 / 150)   # promedio 150
+        self.assertIn((2023, "cobertura_deuda"), est)
 
     def test_sin_saldo_anterior_usa_cierre(self):
         t = tabla_ejemplo()
         t[2022] = math.nan
-        v, _, notas = ratios.calcular_empresa(t, [2023])
+        v, _, _, notas = ratios.calcular_empresa(t, [2023])
         self.assertAlmostEqual(v.loc[2023].roa, 150 / 2200 * 100)
         self.assertTrue(any("saldo de cierre" in n for n in notas))
 

@@ -62,6 +62,7 @@ PARTIDAS = {
                                                   ("resultados", "Operating Income")]),
     "utilidad_neta": ("Utilidad neta", [("resultados", "Net Income"),
                                         ("resultados", "Net Income Common Stockholders")]),
+    "ebitda_normalizado": ("EBITDA normalizado (Yahoo)", [("resultados", "Normalized EBITDA")]),
     "dep_amort": ("Depreciación y amortización", [("flujo", "Depreciation And Amortization"),
                                                   ("flujo", "Depreciation Amortization Depletion"),
                                                   ("resultados", "Reconciled Depreciation")]),

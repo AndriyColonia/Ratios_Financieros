@@ -58,10 +58,13 @@ def grafico_ratio(tsl: pd.DataFrame, ratio: str, foco: str, periodos, ruta: Path
         ax.bar(pos, vals.fillna(0), width=ancho, color=COLOR[clave], label=etiqueta,
                edgecolor=COLOR["fondo"], linewidth=2)
         ns = list(sub.foco_ns) if clave == "foco" else [False] * len(pos)
-        for xp, v, nsv in zip(pos, vals, ns):
+        es_est = [bool(x) if pd.notna(x) else False for x in sub.foco_est] if clave == "foco" else [False] * len(pos)
+        for xp, v, nsv, esv in zip(pos, vals, ns, es_est):
             txt = "n.s." if nsv else _num(v, unidad)
             if not txt:
                 continue
+            if esv:
+                txt += "\n(est.)"
             y = 0 if (isinstance(v, float) and math.isnan(v)) else v
             ax.annotate(txt, (xp, y), xytext=(0, 4 if y >= 0 else -13), textcoords="offset points",
                         ha="center", fontsize=10, fontweight="bold" if clave == "foco" else "normal",

@@ -44,11 +44,12 @@ def unidad_vis(ratio: str) -> str:
     return "%" if pct(ratio) else meta(ratio)["unidad"]
 
 
-def fmt_ratio(valor, ratio: str, ns: bool = False) -> str:
-    """Formato de un valor de ratio según cómo se muestra (con coma/punto de miles y 2 decimales)."""
+def fmt_ratio(valor, ratio: str, ns: bool = False, est: bool = False) -> str:
+    """Formato de un valor de ratio según cómo se muestra. est=True marca un dato estimado."""
     if not ns and not _nan(valor) and pct(ratio):
         valor = valor * 100
-    return fmt(valor, unidad_vis(ratio), ns)
+    txt = fmt(valor, unidad_vis(ratio), ns)
+    return txt + " (est.)" if est and not ns and not _nan(valor) else txt
 
 
 def nombre(tk) -> str:
@@ -75,8 +76,9 @@ def tabla_sector_lider(df: pd.DataFrame, foco: str, periodos, profesor: pd.DataF
             fila_foco = sub[sub.ticker == foco]
             v_foco = fila_foco.valor.iloc[0] if len(fila_foco) else math.nan
             ns_foco = bool(fila_foco.ns.iloc[0]) if len(fila_foco) else False
+            est_foco = bool(fila_foco.est.iloc[0]) if len(fila_foco) and "est" in fila_foco else False
             fila = dict(ratio=ratio, nombre=m["nombre"], familia=m.get("familia", "DuPont"),
-                        unidad=m["unidad"], periodo=p, foco=v_foco, foco_ns=ns_foco,
+                        unidad=m["unidad"], periodo=p, foco=v_foco, foco_ns=ns_foco, foco_est=est_foco,
                         sector=validos.valor.mean() if len(validos) else math.nan,
                         n_empresas=len(validos), lider_valor=math.nan, lider_ticker=None,
                         puesto=None, fuente="calculado")
@@ -309,6 +311,7 @@ def kpis(tsl: pd.DataFrame, foco: str, periodos) -> list[dict]:
             frase_mide=m["que_mide"], frase_posicion=posicion,
             frase_significa=respuesta + " " + _tendencia(list(sub.foco.items()), m["mejor"], ratio),
             serie={int(p): sub.at[p, "foco"] for p in periodos},
+            serie_est={int(p): bool(sub.at[p, "foco_est"]) if pd.notna(sub.at[p, "foco_est"]) else False for p in periodos},
         ))
     return out
 
@@ -403,6 +406,10 @@ def dupont(df: pd.DataFrame, foco: str, periodos) -> tuple[pd.DataFrame, dict]:
 # ---------------------------------------------------------------------------
 # Brecha del último periodo (2026 TTM) frente al sector y al líder
 # ---------------------------------------------------------------------------
+NOTA_EST = ("(est.) Dato estimado: el EBITDA contable de ese año fue negativo y Deuda/EBITDA no se puede calcular "
+            "con él; se usó el EBITDA normalizado de Yahoo o el promedio de los años vecinos (detalle en Notas).")
+
+
 def etiqueta_periodo(p) -> str:
     return f"{p} TTM" if int(p) == config.ANIO_TTM else str(p)
 

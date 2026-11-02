@@ -26,8 +26,10 @@ def _filas_pc3(tsl: pd.DataFrame, ratio: str, foco: str, periodos) -> list[dict]
         r = sub.loc[p]
         filas.append(dict(
             anio=analisis.etiqueta_periodo(p),
-            foco=analisis.fmt_ratio(r.foco, ratio, bool(r.foco_ns) if pd.notna(r.foco_ns) else False),
+            foco=analisis.fmt_ratio(r.foco, ratio, bool(r.foco_ns) if pd.notna(r.foco_ns) else False,
+                                    bool(r.foco_est) if pd.notna(r.foco_est) else False),
             lider=analisis.fmt_ratio(r.lider_valor, ratio),
+            est=bool(r.foco_est) if pd.notna(r.foco_est) else False,
             lider_empresa=r.lider_nombre if isinstance(r.lider_nombre, str) else "s/d",
             sector=analisis.fmt_ratio(r.sector, ratio),
             puesto=f"{int(r.puesto)} de {int(r.n_empresas)}" if pd.notna(r.puesto) else "s/d",
@@ -47,10 +49,11 @@ def _tabla_pc3_html(tsl, ratio, foco, periodos) -> str:
         f"<td>{e(f['sector'])}</td><td class='puesto'>{e(f['puesto'])}</td></tr>"
         for f in _filas_pc3(tsl, ratio, foco, periodos))
     comentario = analisis.comentario_brecha(tsl, ratio, foco, periodos[-1])
+    hay_est = any(f["est"] for f in _filas_pc3(tsl, ratio, foco, periodos))
     return (f"<div class='pc3'><div class='pc3-titulo'>{e(nom.upper())} VS LÍDER VS SECTOR</div>"
             f"<div class='scroll'><table><thead><tr><th>Año</th><th>{e(nom.upper())}</th><th>LÍDER*</th>"
             f"<th>SECTOR*</th><th>PUESTO</th></tr></thead><tbody>{filas}</tbody></table></div>"
-            f"<p class='pc3-nota'>{e(NOTA_ASTERISCO)}</p></div>"
+            f"<p class='pc3-nota'>{e(NOTA_ASTERISCO)}{e(' ' + analisis.NOTA_EST) if hay_est else ''}</p></div>"
             f"<p class='pc3-comentario'>{e(comentario)}</p>")
 
 
@@ -67,7 +70,8 @@ def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, ta
             fila = dict(Familia=k["familia"], KPI=k["nombre"], Pregunta=k["pregunta"], Estado=k["estado_txt"])
             for p in periodos:
                 fila[str(p)] = analisis.fmt_ratio(k["serie"].get(p), k["ratio"],
-                                            bool(tsl[(tsl.ratio == k["ratio"]) & (tsl.periodo == p)].foco_ns.any()))
+                                            bool(tsl[(tsl.ratio == k["ratio"]) & (tsl.periodo == p)].foco_ns.any()),
+                                            k["serie_est"].get(p, False))
             fila.update({"Respuesta (¿cómo se comporta?)": k["respuesta"],
                          "Qué mide": k["frase_mide"], "Posición vs sector y líder": k["frase_posicion"],
                          "Qué significa": k["frase_significa"], "Fórmula": k["formula"]})
@@ -100,7 +104,8 @@ def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, ta
                 ws.cell(fila, 1).fill, ws.cell(fila, 1).font = celeste, Font(bold=True)
                 ws.cell(fila, 2).font = Font(bold=True, color="2563EB")
                 ws.row_dimensions[fila].height = 32
-            ws.cell(fila + 1, 1, NOTA_ASTERISCO).font = Font(italic=True, color="52514E")
+            hay_est = any(f["est"] for f in _filas_pc3(tsl, ratio, foco, periodos))
+            ws.cell(fila + 1, 1, NOTA_ASTERISCO + (" " + analisis.NOTA_EST if hay_est else "")).font = Font(italic=True, color="52514E")
             ws.cell(fila + 2, 1, analisis.comentario_brecha(tsl, ratio, foco, periodos[-1])).font = Font(bold=True)
             fila += 5
 
@@ -275,7 +280,7 @@ def exportar_html(ruta: Path, dir_graf: Path, foco, periodos, tsl, lista_kpis, f
     for k in lista_kpis:
         fila = tsl[(tsl.ratio == k["ratio"]) & (tsl.periodo == k["periodo"])]
         ns = bool(fila.foco_ns.any())
-        valor = analisis.fmt_ratio(k["serie"].get(k["periodo"]), k["ratio"], ns)
+        valor = analisis.fmt_ratio(k["serie"].get(k["periodo"]), k["ratio"], ns, k["serie_est"].get(k["periodo"], False))
         reserva = " <span class='muted'>(reserva)</span>" if k["reserva"] else ""
         partes.append(
             f"<div class='card'><h3>{e(k['nombre'])}{reserva}</h3>"
