@@ -26,10 +26,10 @@ def _filas_pc3(tsl: pd.DataFrame, ratio: str, foco: str, periodos) -> list[dict]
         r = sub.loc[p]
         filas.append(dict(
             anio=analisis.etiqueta_periodo(p),
-            foco=analisis.fmt(r.foco, m["unidad"], bool(r.foco_ns) if pd.notna(r.foco_ns) else False),
-            lider=analisis.fmt(r.lider_valor, m["unidad"]),
+            foco=analisis.fmt_ratio(r.foco, ratio, bool(r.foco_ns) if pd.notna(r.foco_ns) else False),
+            lider=analisis.fmt_ratio(r.lider_valor, ratio),
             lider_empresa=r.lider_nombre if isinstance(r.lider_nombre, str) else "s/d",
-            sector=analisis.fmt(r.sector, m["unidad"]),
+            sector=analisis.fmt_ratio(r.sector, ratio),
             puesto=f"{int(r.puesto)} de {int(r.n_empresas)}" if pd.notna(r.puesto) else "s/d",
         ))
     return filas
@@ -46,11 +46,12 @@ def _tabla_pc3_html(tsl, ratio, foco, periodos) -> str:
         f"<td>{e(f['lider'])}<small>({e(f['lider_empresa'])})</small></td>"
         f"<td>{e(f['sector'])}</td><td class='puesto'>{e(f['puesto'])}</td></tr>"
         for f in _filas_pc3(tsl, ratio, foco, periodos))
-    nota = analisis.nota_brecha(tsl, ratio, foco, periodos[-1])
+    comentario = analisis.comentario_brecha(tsl, ratio, foco, periodos[-1])
     return (f"<div class='pc3'><div class='pc3-titulo'>{e(nom.upper())} VS LÍDER VS SECTOR</div>"
             f"<div class='scroll'><table><thead><tr><th>Año</th><th>{e(nom.upper())}</th><th>LÍDER*</th>"
             f"<th>SECTOR*</th><th>PUESTO</th></tr></thead><tbody>{filas}</tbody></table></div>"
-            f"<p class='pc3-nota'><b>{e(nota)}</b><br>{e(NOTA_ASTERISCO)}</p></div>")
+            f"<p class='pc3-nota'>{e(NOTA_ASTERISCO)}</p></div>"
+            f"<p class='pc3-comentario'>{e(comentario)}</p>")
 
 
 def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, tabla_dp, textos_dp,
@@ -65,7 +66,7 @@ def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, ta
         for k in lista_kpis:
             fila = dict(Familia=k["familia"], KPI=k["nombre"], Pregunta=k["pregunta"], Estado=k["estado_txt"])
             for p in periodos:
-                fila[str(p)] = analisis.fmt(k["serie"].get(p), k["unidad"],
+                fila[str(p)] = analisis.fmt_ratio(k["serie"].get(p), k["ratio"],
                                             bool(tsl[(tsl.ratio == k["ratio"]) & (tsl.periodo == p)].foco_ns.any()))
             fila.update({"Respuesta (¿cómo se comporta?)": k["respuesta"],
                          "Qué mide": k["frase_mide"], "Posición vs sector y líder": k["frase_posicion"],
@@ -99,8 +100,8 @@ def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, ta
                 ws.cell(fila, 1).fill, ws.cell(fila, 1).font = celeste, Font(bold=True)
                 ws.cell(fila, 2).font = Font(bold=True, color="2563EB")
                 ws.row_dimensions[fila].height = 32
-            ws.cell(fila + 1, 1, analisis.nota_brecha(tsl, ratio, foco, periodos[-1])).font = Font(bold=True)
-            ws.cell(fila + 2, 1, NOTA_ASTERISCO).font = Font(italic=True, color="52514E")
+            ws.cell(fila + 1, 1, NOTA_ASTERISCO).font = Font(italic=True, color="52514E")
+            ws.cell(fila + 2, 1, analisis.comentario_brecha(tsl, ratio, foco, periodos[-1])).font = Font(bold=True)
             fila += 5
 
         # 4. DuPont
@@ -118,8 +119,8 @@ def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, ta
         fila = 0
         for ratio in list(config.RATIOS) + ["rotacion_activos", "apalancamiento"]:
             m = analisis.meta(ratio)
-            mat = analisis.matriz_empresas(df, ratio, periodos).round(2)
-            pd.DataFrame([[f"{m['nombre']} ({m['unidad']})"]]).to_excel(
+            mat = (analisis.matriz_empresas(df, ratio, periodos) * (100 if analisis.pct(ratio) else 1)).round(2)
+            pd.DataFrame([[f"{m['nombre']} ({analisis.unidad_vis(ratio)})"]]).to_excel(
                 w, sheet_name="Todas las empresas", startrow=fila, index=False, header=False)
             mat.to_excel(w, sheet_name="Todas las empresas", startrow=fila + 1)
             w.sheets["Todas las empresas"].cell(fila + 1, 1).font = Font(bold=True, size=12)
@@ -226,7 +227,9 @@ padding:10px 12px;white-space:nowrap}
 .pc3 tbody th{background:var(--pc3-celeste);color:var(--txt);font-weight:700;text-align:center}
 .pc3 td.emp{color:var(--pc3-azul);font-weight:700;font-size:16px}
 .pc3 td small{display:block;font-size:11px;color:var(--txt2)}.pc3 td.puesto{color:var(--txt2)}
-.pc3-nota{font-size:13px;color:var(--txt2);margin:8px 0 0}.pc3-nota b{color:var(--txt)}
+.pc3-nota{font-size:12px;color:var(--txt2);margin:6px 0 0}
+.pc3-comentario{margin:10px 0 4px;padding:10px 14px;border-left:4px solid var(--pc3-azul);background:var(--pc3-celeste);
+border-radius:0 8px 8px 0;max-width:620px;font-size:14px}
 ol{padding-left:20px;margin:8px 0}details summary{cursor:pointer;color:var(--foco);margin-top:8px}
 """
 
@@ -272,7 +275,7 @@ def exportar_html(ruta: Path, dir_graf: Path, foco, periodos, tsl, lista_kpis, f
     for k in lista_kpis:
         fila = tsl[(tsl.ratio == k["ratio"]) & (tsl.periodo == k["periodo"])]
         ns = bool(fila.foco_ns.any())
-        valor = analisis.fmt(k["serie"].get(k["periodo"]), k["unidad"], ns)
+        valor = analisis.fmt_ratio(k["serie"].get(k["periodo"]), k["ratio"], ns)
         reserva = " <span class='muted'>(reserva)</span>" if k["reserva"] else ""
         partes.append(
             f"<div class='card'><h3>{e(k['nombre'])}{reserva}</h3>"
@@ -318,7 +321,7 @@ def exportar_html(ruta: Path, dir_graf: Path, foco, periodos, tsl, lista_kpis, f
         cab = "".join(f"<th>{p}</th>" for p in mat.columns)
         filas_html = "".join(
             f"<tr class='{'foco' if idx == nom else ''}'><td>{e(idx)}</td>"
-            + "".join(f"<td>{e(analisis.fmt(v, m['unidad']))}</td>" for v in fila) + "</tr>"
+            + "".join(f"<td>{e(analisis.fmt_ratio(v, ratio))}</td>" for v in fila) + "</tr>"
             for idx, fila in mat.iterrows())
         partes.append(f"<details><summary>{e(m['nombre'])}</summary><div class='card scroll'><table>"
                       f"<thead><tr><th>Empresa</th>{cab}</tr></thead><tbody>{filas_html}</tbody></table></div></details>")

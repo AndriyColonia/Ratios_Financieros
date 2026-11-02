@@ -99,12 +99,12 @@ FAMILIAS = {
 
 RATIOS = {
     "liquidez_corriente": dict(
-        nombre="Liquidez corriente", familia="Liquidez", unidad="veces", mejor="alto",
+        nombre="Liquidez corriente", familia="Liquidez", unidad="veces", pct=True, mejor="alto",
         formula="Activo corriente / Pasivo corriente",
         que_mide="Mide cuántos dólares de activo corriente tiene la empresa por cada dólar que debe a corto plazo.",
         pregunta="¿Es líquida?"),
     "prueba_acida": dict(
-        nombre="Prueba ácida", familia="Liquidez", unidad="veces", mejor="alto",
+        nombre="Prueba ácida", familia="Liquidez", unidad="veces", pct=True, mejor="alto",
         formula="(Activo corriente − Inventario) / Pasivo corriente",
         que_mide="Mide la liquidez sin contar el inventario, que es el activo corriente más difícil de convertir en caja.",
         pregunta="¿Puede pagar sin vender inventario?", reserva=True),
@@ -114,7 +114,7 @@ RATIOS = {
         que_mide="Mide el colchón en dinero que queda después de cubrir las deudas de corto plazo.",
         pregunta="¿Tiene colchón de corto plazo?"),
     "endeudamiento": dict(
-        nombre="Endeudamiento (Pasivo/Patrimonio)", familia="Solvencia", unidad="veces", mejor="bajo",
+        nombre="Endeudamiento (Pasivo/Patrimonio)", familia="Solvencia", unidad="veces", pct=True, mejor="bajo",
         formula="Pasivo total / Patrimonio total",
         que_mide="Mide cuántos dólares de terceros financian la empresa por cada dólar de los accionistas.",
         pregunta="¿Depende mucho de la deuda?"),

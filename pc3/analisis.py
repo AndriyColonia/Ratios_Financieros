@@ -35,6 +35,22 @@ def fmt(valor, unidad: str, ns: bool = False) -> str:
     return f"{valor:,.2f}x"
 
 
+def pct(ratio: str) -> bool:
+    """True si el ratio se muestra en % (liquidez, prueba ácida, endeudamiento: 1.54x -> 154.00 %)."""
+    return bool(meta(ratio).get("pct"))
+
+
+def unidad_vis(ratio: str) -> str:
+    return "%" if pct(ratio) else meta(ratio)["unidad"]
+
+
+def fmt_ratio(valor, ratio: str, ns: bool = False) -> str:
+    """Formato de un valor de ratio según cómo se muestra (con coma/punto de miles y 2 decimales)."""
+    if not ns and not _nan(valor) and pct(ratio):
+        valor = valor * 100
+    return fmt(valor, unidad_vis(ratio), ns)
+
+
 def nombre(tk) -> str:
     return config.EMPRESAS.get(tk, tk) if isinstance(tk, str) else "s/d"
 
@@ -130,7 +146,7 @@ def veredicto(ratio: str, v, s, ns: bool = False) -> tuple[str, str]:
     """Devuelve (estado, respuesta corta a la pregunta del KPI)."""
     m = meta(ratio)
     rel = comparar(v, s, m["mejor"])
-    s_txt = fmt(s, m["unidad"])
+    s_txt = fmt_ratio(s, ratio)
 
     if ns:
         if ratio == "cobertura_deuda":
@@ -201,8 +217,7 @@ def veredicto(ratio: str, v, s, ns: bool = False) -> tuple[str, str]:
         return "malo", textos[ratio] + f" (sector: {s_txt})."
 
     # Ratios que solo se leen contra el sector
-    unidad = m["unidad"]
-    v_txt = fmt(v, unidad)
+    v_txt = fmt_ratio(v, ratio)
     textos = {
         "dias_inventario": {
             "mejor": f"Sí. Su producto pasa {v_txt} en almacén frente a {s_txt} del sector: rota más rápido.",
@@ -249,7 +264,7 @@ def veredicto(ratio: str, v, s, ns: bool = False) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # KPI con las 3 frases para exponer
 # ---------------------------------------------------------------------------
-def _tendencia(serie: list, mejor: str, unidad: str) -> str:
+def _tendencia(serie: list, mejor: str, ratio: str) -> str:
     pares = [(p, v) for p, v in serie if not _nan(v)]
     if len(pares) < 2:
         return ""
@@ -257,9 +272,9 @@ def _tendencia(serie: list, mejor: str, unidad: str) -> str:
     sube = v1 > v0
     mejora = sube if mejor == "alto" else not sube
     if math.isclose(v0, v1, rel_tol=0.02, abs_tol=1e-9):
-        return f"Entre {p0} y {p1} se mantuvo estable ({fmt(v0, unidad)} → {fmt(v1, unidad)})."
+        return f"Entre {p0} y {p1} se mantuvo estable ({fmt_ratio(v0, ratio)} → {fmt_ratio(v1, ratio)})."
     return (f"Entre {p0} y {p1} {'mejoró' if mejora else 'empeoró'} "
-            f"({fmt(v0, unidad)} → {fmt(v1, unidad)}).")
+            f"({fmt_ratio(v0, ratio)} → {fmt_ratio(v1, ratio)}).")
 
 
 def kpis(tsl: pd.DataFrame, foco: str, periodos) -> list[dict]:
@@ -278,12 +293,12 @@ def kpis(tsl: pd.DataFrame, foco: str, periodos) -> list[dict]:
         if not _nan(f.foco) and not _nan(f.sector):
             rel = comparar(f.foco, f.sector, m["mejor"])
             rel_txt = {"mejor": "mejor que", "similar": "en línea con", "peor": "peor que"}[rel]
-            lider = (f"el líder es {f.lider_nombre} con {fmt(f.lider_valor, m['unidad'])}"
+            lider = (f"el líder es {f.lider_nombre} con {fmt_ratio(f.lider_valor, ratio)}"
                      if isinstance(f.lider_ticker, str) and f.lider_ticker != foco
                      else f"{nom_foco} es el líder del sector")
             puesto = f" Ocupa el puesto {int(f.puesto)} de {int(f.n_empresas)}." if pd.notna(f.puesto) else ""
-            posicion = (f"En {ultimo}, {nom_foco} registra {fmt(f.foco, m['unidad'])}, {rel_txt} el sector "
-                        f"({fmt(f.sector, m['unidad'])}); {lider}.{puesto}")
+            posicion = (f"En {ultimo}, {nom_foco} registra {fmt_ratio(f.foco, ratio)}, {rel_txt} el sector "
+                        f"({fmt_ratio(f.sector, ratio)}); {lider}.{puesto}")
         elif ns:
             posicion = f"En {ultimo}, el ratio de {nom_foco} no es significativo (n.s.)."
 
@@ -292,7 +307,7 @@ def kpis(tsl: pd.DataFrame, foco: str, periodos) -> list[dict]:
             pregunta=m["pregunta"], reserva=m.get("reserva", False), periodo=int(ultimo),
             estado=estado, estado_txt=ESTADOS[estado], respuesta=respuesta,
             frase_mide=m["que_mide"], frase_posicion=posicion,
-            frase_significa=respuesta + " " + _tendencia(list(sub.foco.items()), m["mejor"], m["unidad"]),
+            frase_significa=respuesta + " " + _tendencia(list(sub.foco.items()), m["mejor"], ratio),
             serie={int(p): sub.at[p, "foco"] for p in periodos},
         ))
     return out
@@ -392,47 +407,54 @@ def etiqueta_periodo(p) -> str:
     return f"{p} TTM" if int(p) == config.ANIO_TTM else str(p)
 
 
-def brecha(v, ref, unidad: str, mejor: str):
-    """Devuelve (texto, a_favor) o (None, None). En ratios en % la brecha va en
-    puntos porcentuales (p.p.); en el resto, en % sobre la referencia."""
-    if _nan(v) or _nan(ref):
-        return None, None
-    if unidad == "%":
-        dif = v - ref
-        texto = f"{abs(dif):,.2f} p.p."
-    else:
-        if ref == 0:
-            return None, None
-        dif = (v - ref) / abs(ref) * 100
-        texto = f"{abs(dif):,.2f} %"
-    if abs(dif) < 0.005:
-        return "igual", None
-    a_favor = dif > 0 if mejor == "alto" else dif < 0
-    return texto, a_favor
-
-
-def nota_brecha(tsl: pd.DataFrame, ratio: str, foco: str, periodo: int) -> str:
+def _brecha(v, ref, ratio: str):
+    """Diferencia entre v y ref en la unidad que se muestra. Devuelve None si falta un dato, o
+    (texto de la diferencia, texto relativo, está_por_encima, es_mejor). 'igual' si no hay diferencia."""
     m = meta(ratio)
+    if _nan(v) or _nan(ref):
+        return None
+    factor = 100 if pct(ratio) else 1
+    unidad = unidad_vis(ratio)
+    dif = (v - ref) * factor
+    if abs(dif) < 0.005:
+        return "igual"
+    arriba = dif > 0
+    es_mejor = arriba if m["mejor"] == "alto" else not arriba
+    a = abs(dif)
+    texto = {"%": f"{a:,.2f} p.p.", "días": f"{a:,.2f} días", "años": f"{a:,.2f} años",
+             "M USD": f"{a:,.0f} M USD"}.get(unidad, f"{a:,.2f}x")
+    # El % relativo solo tiene sentido si el ratio no es ya un % (en márgenes se usan p.p.)
+    rel = ""
+    if (unidad != "%" or pct(ratio)) and ref != 0:
+        r = (v - ref) / abs(ref) * 100
+        rel = f" ({abs(r):,.2f} % {'más' if r > 0 else 'menos'})"
+    return texto, rel, arriba, es_mejor
+
+
+def comentario_brecha(tsl: pd.DataFrame, ratio: str, foco: str, periodo: int) -> str:
+    """Comentario para el último periodo: cuánto mejor o peor está la empresa que el sector y el líder."""
     f = tsl[(tsl.ratio == ratio) & (tsl.periodo == periodo)]
     if f.empty:
         return ""
     f = f.iloc[0]
     nom = nombre(foco)
-    inicio = f"Nota {etiqueta_periodo(periodo)}: "
+    inicio = f"Comentario {etiqueta_periodo(periodo)}: "
     if f.foco_ns:
         return inicio + f"el ratio de {nom} no es significativo (n.s.), no se puede comparar."
 
-    def parte(ref, contra):
-        texto, a_favor = brecha(f.foco, ref, m["unidad"], m["mejor"])
-        if texto is None:
-            return f"sin dato frente {contra}"
-        if texto == "igual":
-            return f"igual frente {contra}"
-        return f"{texto} {'a favor' if a_favor else 'en contra'} frente {contra}"
+    def frase(ref, del_quien):
+        b = _brecha(f.foco, ref, ratio)
+        if b is None:
+            return f"sin dato {del_quien} para comparar"
+        if b == "igual":
+            return f"igual {del_quien}"
+        texto, rel, arriba, mejor = b
+        return (f"{texto} {'por encima' if arriba else 'por debajo'} {del_quien}{rel}, "
+                f"es decir, {'mejor' if mejor else 'peor'}")
 
-    txt = inicio + f"{nom} está {parte(f.sector, 'al sector')}"
+    txt = inicio + f"{nom} está {frase(f.sector, 'del sector')}."
     if f.lider_ticker == foco:
-        txt += " y es el líder del sector."
+        txt += f" {nom} es el líder del sector en este ratio."
     else:
-        txt += f" y {parte(f.lider_valor, f'al líder ({f.lider_nombre})')}."
+        txt += f" Frente al líder ({f.lider_nombre}) está {frase(f.lider_valor, 'del líder')}."
     return txt

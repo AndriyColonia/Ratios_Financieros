@@ -43,31 +43,36 @@ def _num(v, unidad):
 
 
 def grafico_ratio(tsl: pd.DataFrame, ratio: str, foco: str, periodos, ruta: Path):
-    """Barras agrupadas por año: empresa foco, sector y líder (como en las láminas)."""
+    """Barras agrupadas por año: empresa foco, sector y líder, con el número sobre cada barra."""
     m = analisis.meta(ratio)
+    factor, unidad = (100 if analisis.pct(ratio) else 1), analisis.unidad_vis(ratio)
     sub = tsl[tsl.ratio == ratio].set_index("periodo").reindex(periodos)
     fig, ax = plt.subplots(figsize=(12, 6.75), dpi=130)
-    ancho = 0.26
+    ancho = 0.27
     x = range(len(periodos))
     series = [("foco", analisis.nombre(foco), sub.foco), ("sector", "Sector (promedio)", sub.sector),
               ("lider", "Líder", sub.lider_valor)]
     for i, (clave, etiqueta, vals) in enumerate(series):
+        vals = vals * factor
         pos = [xi + (i - 1) * ancho for xi in x]
         ax.bar(pos, vals.fillna(0), width=ancho, color=COLOR[clave], label=etiqueta,
                edgecolor=COLOR["fondo"], linewidth=2)
-        if clave == "foco":
-            for xp, v, nsv in zip(pos, vals, sub.foco_ns):
-                txt = "n.s." if nsv else _num(v, m["unidad"])
-                if txt:
-                    y = 0 if (isinstance(v, float) and math.isnan(v)) else v
-                    ax.annotate(txt, (xp, y), xytext=(0, 4 if y >= 0 else -14), textcoords="offset points",
-                                ha="center", fontsize=11, fontweight="bold", color=COLOR["texto"])
+        ns = list(sub.foco_ns) if clave == "foco" else [False] * len(pos)
+        for xp, v, nsv in zip(pos, vals, ns):
+            txt = "n.s." if nsv else _num(v, unidad)
+            if not txt:
+                continue
+            y = 0 if (isinstance(v, float) and math.isnan(v)) else v
+            ax.annotate(txt, (xp, y), xytext=(0, 4 if y >= 0 else -13), textcoords="offset points",
+                        ha="center", fontsize=10, fontweight="bold" if clave == "foco" else "normal",
+                        color=COLOR["texto"])
     etiquetas = []
     for p in periodos:
         lid = sub.at[p, "lider_nombre"] if p in sub.index else None
         etiquetas.append(f"{p}\nLíder: {lid}" if isinstance(lid, str) and lid != "s/d" else str(p))
     ax.set_xticks(list(x), etiquetas)
-    ax.set_ylabel(m["unidad"])
+    ax.set_ylabel(unidad)
+    ax.margins(y=0.12)
     ax.set_title(f"{m['nombre']}: {analisis.nombre(foco)} vs sector y líder", loc="left", pad=28)
     ax.text(0, 1.02, m.get("formula", ""), transform=ax.transAxes, color=COLOR["texto2"], fontsize=11)
     ax.legend(loc="upper left", bbox_to_anchor=(0, -0.14), ncol=3)
@@ -80,7 +85,9 @@ def grafico_ratio(tsl: pd.DataFrame, ratio: str, foco: str, periodos, ruta: Path
 def grafico_ranking(df: pd.DataFrame, tsl: pd.DataFrame, ratio: str, foco: str, periodo: int, ruta: Path):
     """Las 9 empresas ordenadas de mejor a peor en el último periodo; foco resaltado."""
     m = analisis.meta(ratio)
-    sub = df[(df.ratio == ratio) & (df.periodo == periodo)].dropna(subset=["valor"])
+    factor, unidad = (100 if analisis.pct(ratio) else 1), analisis.unidad_vis(ratio)
+    sub = df[(df.ratio == ratio) & (df.periodo == periodo)].dropna(subset=["valor"]).copy()
+    sub["valor"] = sub.valor * factor
     if sub.empty:
         return False
     sub = sub.sort_values("valor", ascending=(m["mejor"] != "bajo"))  # el mejor queda arriba
@@ -88,19 +95,19 @@ def grafico_ranking(df: pd.DataFrame, tsl: pd.DataFrame, ratio: str, foco: str, 
     colores = [COLOR["foco"] if t == foco else COLOR["resto"] for t in sub.ticker]
     nombres = [analisis.nombre(t) for t in sub.ticker]
     ax.barh(nombres, sub.valor, color=colores, edgecolor=COLOR["fondo"], linewidth=2, height=0.7)
-    sector = tsl[(tsl.ratio == ratio) & (tsl.periodo == periodo)].sector
+    sector = tsl[(tsl.ratio == ratio) & (tsl.periodo == periodo)].sector * factor
     if len(sector) and pd.notna(sector.iloc[0]):
         ax.axvline(sector.iloc[0], color=COLOR["texto"], linestyle="--", linewidth=1.2, zorder=1)
-        ax.annotate(f"Sector {_num(sector.iloc[0], m['unidad'])}", (sector.iloc[0], 1), xycoords=("data", "axes fraction"),
+        ax.annotate(f"Sector {_num(sector.iloc[0], unidad)}", (sector.iloc[0], 1), xycoords=("data", "axes fraction"),
                     xytext=(0, 4), textcoords="offset points", ha="center", va="bottom", fontsize=11,
                     color=COLOR["texto"])
     for i, (v, tk) in enumerate(zip(sub.valor, sub.ticker)):
-        ax.annotate(_num(v, m["unidad"]), (v, i), xytext=(5 if v >= 0 else -5, 0), textcoords="offset points",
+        ax.annotate(_num(v, unidad), (v, i), xytext=(5 if v >= 0 else -5, 0), textcoords="offset points",
                     va="center", ha="left" if v >= 0 else "right", fontsize=11, color=COLOR["texto"],
                     fontweight="bold" if tk == foco else "normal", zorder=3,
                     bbox=dict(boxstyle="round,pad=0.15", fc=COLOR["fondo"], ec="none"))
     ax.set_title(f"{m['nombre']} {periodo}: ranking de las {len(sub)} empresas", loc="left", pad=26)
-    ax.set_xlabel(m["unidad"] + ("  (menor es mejor)" if m["mejor"] == "bajo" else "  (mayor es mejor)"))
+    ax.set_xlabel(unidad + ("  (menor es mejor)" if m["mejor"] == "bajo" else "  (mayor es mejor)"))
     ax.grid(axis="x", color=COLOR["grilla"], linewidth=0.8)
     ax.set_axisbelow(True)
     for lado in ("top", "right", "bottom"):
