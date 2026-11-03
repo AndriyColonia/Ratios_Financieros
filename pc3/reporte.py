@@ -1,4 +1,4 @@
-"""Salidas: Excel con tablas, HTML con KPI/ratios/DuPont/gráficos y guion para exponer."""
+"""Salidas: Excel con tablas y HTML con KPI, ratios, DuPont, gráficos y noticias."""
 from __future__ import annotations
 
 import base64
@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from . import analisis, config
+from . import analisis, config, noticias
 
 RELLENO_ESTADO = {"bueno": "D9F2E6", "regular": "FFF1CC", "malo": "FADBD8", "ns": "FADBD8", "sd": "EEEEEE"}
 
@@ -58,7 +58,7 @@ def _tabla_pc3_html(tsl, ratio, foco, periodos) -> str:
 
 
 def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, tabla_dp, textos_dp,
-                   tablas, notas):
+                   tablas, notas, noticias_df=None):
     with pd.ExcelWriter(ruta, engine="openpyxl") as w:
         # 1. Resumen por familia
         pd.DataFrame([dict(Familia=f, Pregunta=c["pregunta"], Estado=analisis.ESTADOS[c["estado"]],
@@ -73,8 +73,7 @@ def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, ta
                                             bool(tsl[(tsl.ratio == k["ratio"]) & (tsl.periodo == p)].foco_ns.any()),
                                             k["serie_est"].get(p, False))
             fila.update({"Respuesta (¿cómo se comporta?)": k["respuesta"],
-                         "Qué mide": k["frase_mide"], "Posición vs sector y líder": k["frase_posicion"],
-                         "Qué significa": k["frase_significa"], "Fórmula": k["formula"]})
+                         "Evolución": k["evolucion"], "Fórmula": k["formula"]})
             filas.append(fila)
         pd.DataFrame(filas).to_excel(w, sheet_name="KPI", index=False)
         ws = w.sheets["KPI"]
@@ -141,6 +140,15 @@ def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, ta
         if base:
             pd.concat(base).to_excel(w, sheet_name="Datos base (M USD)", index=False)
 
+        # 6b. Noticias que respaldan cada ratio
+        if noticias_df is not None and not noticias_df.empty:
+            nd = noticias_df.copy()
+            nd["ratio"] = nd.ratio.map(lambda r: analisis.meta(r)["nombre"] if r in config.RATIOS else r)
+            nd["origen"] = nd.origen.map({"equipo": "Equipo", "yahoo": "Yahoo (automática)"})
+            nd.rename(columns={"ticker": "Empresa", "ratio": "Ratio", "fecha": "Fecha", "titular": "Titular",
+                               "fuente": "Fuente", "extracto": "Extracto", "url": "Enlace",
+                               "origen": "Origen"}).to_excel(w, sheet_name="Noticias", index=False)
+
         # 7. Notas
         pd.DataFrame(notas, columns=["Tipo", "Empresa", "Nota"]).to_excel(w, sheet_name="Notas", index=False)
 
@@ -161,34 +169,6 @@ def exportar_excel(ruta: Path, foco, periodos, tsl, lista_kpis, familias, df, ta
                     for c in fila_celdas:
                         c.alignment = Alignment(wrap_text=True, vertical="top")
             ws.freeze_panes = "A2" if ws.title in ("KPI", "Conclusiones", "Datos base (M USD)") else None
-
-
-# ---------------------------------------------------------------------------
-# Guion (Markdown) para estudiar y exponer
-# ---------------------------------------------------------------------------
-def exportar_guion(ruta: Path, foco, periodos, lista_kpis, familias, textos_dp):
-    nom = analisis.nombre(foco)
-    lineas = [f"# Guion PC3: ratios financieros de {nom}", "",
-              f"Generado el {dt.date.today().isoformat()}. Periodos: {', '.join(map(str, periodos))}. "
-              "Plantilla de 3 frases por lámina: qué mide, dónde está frente al sector y al líder, qué significa.", ""]
-    for familia, c in familias.items():
-        lineas += [f"## {familia}: {c['pregunta']}", "", f"**{c['respuesta']}**", ""]
-        for k in [k for k in lista_kpis if k["familia"] == familia]:
-            reserva = " (reserva, no entra en la tabla del profesor)" if k["reserva"] else ""
-            lineas += [f"### {k['nombre']}{reserva}", "",
-                       f"*Fórmula:* {k['formula']}  ",
-                       f"*{k['pregunta']}* **{k['estado_txt']}**", "",
-                       f"1. {k['frase_mide']}",
-                       f"2. {k['frase_posicion'] or 'Sin datos para comparar.'}",
-                       f"3. {k['frase_significa'].strip()}", ""]
-    lineas += ["## DuPont: ¿qué explica su ROE?", ""]
-    for p, t in textos_dp.items():
-        lineas += [f"- **{p}:** {t}"]
-    lineas += ["", "## Conexiones que suele preguntar el profesor", "",
-               "- Ciclo de efectivo = días de inventario + días de cobro − días de pago.",
-               "- ROE = margen neto × rotación de activos × apalancamiento.",
-               "- Si el margen cae, el ROA y el ROE caen con él."]
-    ruta.write_text("\n".join(lineas) + "\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +215,8 @@ padding:10px 12px;white-space:nowrap}
 .pc3-nota{font-size:12px;color:var(--txt2);margin:6px 0 0}
 .pc3-comentario{margin:10px 0 4px;padding:10px 14px;border-left:4px solid var(--pc3-azul);background:var(--pc3-celeste);
 border-radius:0 8px 8px 0;max-width:620px;font-size:14px}
-ol{padding-left:20px;margin:8px 0}details summary{cursor:pointer;color:var(--foco);margin-top:8px}
+.lectura{margin:10px 0}.noticias{margin:10px 0;font-size:14px}.noticias ul{padding-left:18px;margin:6px 0}
+.noticias li{margin:6px 0}.noticias a{color:var(--foco)}code{background:var(--pc3-celeste);padding:1px 5px;border-radius:4px}ol{padding-left:20px;margin:8px 0}details summary{cursor:pointer;color:var(--foco);margin-top:8px}
 """
 
 ICONO = {"bueno": "▲", "regular": "●", "malo": "▼", "ns": "▼", "sd": "–"}
@@ -252,8 +233,24 @@ def _badge(estado: str, texto: str | None = None) -> str:
     return f'<span class="badge {estado}">{ICONO[estado]} {html.escape(texto or analisis.ESTADOS[estado])}</span>'
 
 
+def _noticias_html(lista: list) -> str:
+    e = html.escape
+    if not lista:
+        return ("<p class='muted noticias'>Sin noticias asociadas a este ratio. Puedes agregarlas en "
+                "<code>datos/noticias_manuales.csv</code>.</p>")
+    items = ""
+    for n in lista:
+        titular = (f"<a href='{e(n['url'], quote=True)}' target='_blank' rel='noopener'>{e(n['titular'])}</a>"
+                   if n.get("url") else e(n["titular"]))
+        origen = "Seleccionada por el equipo" if n.get("origen") == "equipo" else "Coincidencia automática"
+        extracto = f"<br>{e(noticias.recortar(n['extracto']))}" if n.get("extracto") else ""
+        items += (f"<li>{titular}<span class='muted'> · {e(n.get('fuente') or '')} · {e(n.get('fecha') or 's/f')}"
+                  f" · {origen}</span>{extracto}</li>")
+    return f"<div class='noticias'><b>Noticias que respaldan este resultado</b><ul>{items}</ul></div>"
+
+
 def exportar_html(ruta: Path, dir_graf: Path, foco, periodos, tsl, lista_kpis, familias, df, tabla_dp,
-                  textos_dp, notas, info):
+                  textos_dp, notas, info, noticias_ratio=None):
     e = html.escape
     nom = analisis.nombre(foco)
     partes = [f"<!doctype html><html lang='es'><head><meta charset='utf-8'>"
@@ -265,8 +262,7 @@ def exportar_html(ruta: Path, dir_graf: Path, foco, periodos, tsl, lista_kpis, f
               f"{e(', '.join(map(str, periodos)))}. Generado el {dt.date.today().isoformat()}.</p>",
               "<nav><a href='#kpi'>KPI</a><a href='#ratios'>Ratios</a><a href='#dupont'>DuPont</a>"
               "<a href='#empresas'>Las 9 empresas</a><a href='#notas'>Notas</a>"
-              f"<a href='PC3_{e(foco)}.xlsx' download>Descargar Excel</a>"
-              f"<a href='PC3_{e(foco)}_guion.md' download>Descargar guion</a></nav>"]
+              f"<a href='PC3_{e(foco)}.xlsx' download>Descargar Excel</a></nav>"]
 
     # Conclusiones por familia
     partes.append("<h2 id='kpi'>KPI: ¿cómo está la empresa?</h2><div class='grid'>")
@@ -290,7 +286,7 @@ def exportar_html(ruta: Path, dir_graf: Path, foco, periodos, tsl, lista_kpis, f
     partes.append("</div>")
 
     # Ratios: tabla + gráficos + 3 frases
-    partes.append("<h2 id='ratios'>Ratios: tabla, gráfico y guion de 3 frases</h2>")
+    partes.append("<h2 id='ratios'>Ratios: tabla, lectura del KPI y gráficos</h2>")
     for k in lista_kpis:
         img_ratio = _img(dir_graf / (k["ratio"] + ".png"))
         img_rank = _img(dir_graf / (k["ratio"] + "_ranking.png"))
@@ -298,8 +294,8 @@ def exportar_html(ruta: Path, dir_graf: Path, foco, periodos, tsl, lista_kpis, f
             f"<section class='ratio card' id='{k['ratio']}'><h3>{e(k['nombre'])} {_badge(k['estado'])}</h3>"
             f"<div class='muted'>{e(k['formula'])}</div>"
             f"{_tabla_pc3_html(tsl, k['ratio'], foco, periodos)}"
-            f"<ol><li>{e(k['frase_mide'])}</li><li>{e(k['frase_posicion'] or 'Sin datos para comparar.')}</li>"
-            f"<li>{e(k['frase_significa'].strip())}</li></ol>"
+            f"<p class='lectura'><b>Lectura del KPI ({k['periodo']}):</b> {e(k['respuesta'])} {e(k['evolucion'])}</p>"
+            f"{_noticias_html((noticias_ratio or {}).get(k['ratio'], []))}"
             f"<div class='dos'>{img_ratio}{img_rank}</div></section>")
 
     # DuPont

@@ -3,6 +3,7 @@ flujo funcionen. No son datos reales de ninguna empresa.
 
 Ejecutar:  python -m unittest discover tests
 """
+import datetime as dt
 import math
 import tempfile
 import unittest
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from pc3 import analisis, config, datos, descarga, principal, ratios
+from pc3 import analisis, config, datos, descarga, noticias, principal, ratios
 
 
 def _frame(filas: dict, fechas):
@@ -148,14 +149,15 @@ class TestAnalisis(unittest.TestCase):
         f = self.tsl[(self.tsl.ratio == "dias_cobro")].iloc[0]
         self.assertEqual(f.lider_valor, self.df[self.df.ratio == "dias_cobro"].valor.min())
 
-    def test_kpi_tiene_veredicto_y_tres_frases(self):
+    def test_kpi_tiene_veredicto_y_evolucion(self):
         ks = analisis.kpis(self.tsl, "INTC", [2023])
         mn = next(k for k in ks if k["ratio"] == "margen_neto")
         self.assertEqual(mn["estado"], "malo")
         self.assertTrue(mn["respuesta"].startswith("No."))
         liq = next(k for k in ks if k["ratio"] == "liquidez_corriente")
         self.assertEqual(liq["estado"], "bueno")
-        self.assertTrue(liq["frase_posicion"])
+        self.assertIn("evolucion", liq)
+        self.assertNotIn("frase_mide", liq)
         fam = analisis.conclusiones_familia(ks, "INTC")
         self.assertEqual(set(fam), set(config.FAMILIAS))
 
@@ -171,6 +173,49 @@ class TestAnalisis(unittest.TestCase):
         tsl = analisis.tabla_sector_lider(self.df, "INTC", [2023], prof)
         f = tsl[tsl.ratio == "dias_pago"].iloc[0]
         self.assertEqual((f.sector, f.lider_valor, f.lider_nombre), (52.96, 28.25, "Lam Research"))
+
+
+class TestNoticias(unittest.TestCase):
+    def test_normaliza_formato_nuevo_y_antiguo(self):
+        nuevo = {"content": {"title": "Intel <b>cuts</b> jobs", "summary": "Restructuring and layoffs.",
+                             "pubDate": "2026-09-10T12:00:00Z", "provider": {"displayName": "Reuters"},
+                             "canonicalUrl": {"url": "https://ej.com/a"}}}
+        antiguo = {"title": "Debt offering", "publisher": "AP", "link": "https://ej.com/b",
+                   "providerPublishTime": 1788000000}
+        a, b = noticias.normalizar_yahoo(nuevo, "INTC"), noticias.normalizar_yahoo(antiguo, "INTC")
+        self.assertEqual((a["titular"], a["fuente"], a["fecha"], a["url"]),
+                         ("Intel cuts jobs", "Reuters", "2026-09-10", "https://ej.com/a"))
+        self.assertEqual((b["fuente"], b["url"]), ("AP", "https://ej.com/b"))
+        self.assertIsNone(noticias.normalizar_yahoo({"content": {}}, "INTC"))
+
+    def test_asignacion_por_ratio_y_prioridad_manual(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            orig = datos.DIR_DATOS
+            datos.DIR_DATOS = Path(tmp)
+            try:
+                pd.DataFrame([
+                    dict(ticker="INTC", ratio="", fecha="2026-08-01", titular="Intel announces layoffs and restructuring",
+                         fuente="Y", extracto="Job cuts to reduce operating expenses.", url="u1"),
+                    dict(ticker="INTC", ratio="", fecha="2026-07-01", titular="Intel prices bond offering",
+                         fuente="Y", extracto="New debt to fund fabs.", url="u2"),
+                    dict(ticker="INTC", ratio="", fecha="2024-01-01", titular="Old inventory news",
+                         fuente="Y", extracto="inventory", url="u3"),
+                    dict(ticker="AMD", ratio="", fecha="2026-08-01", titular="AMD debt", fuente="Y", extracto="", url="u4"),
+                ]).to_csv(noticias.ruta_auto(), index=False)
+                pd.DataFrame([dict(ticker="INTC", ratio="dias_inventario", fecha="2026-06-01",
+                                   titular="Intel redujo inventario", fuente="Equipo", extracto="x", url="m1")]
+                             ).to_csv(noticias.ruta_manual(), index=False)
+                por_ratio, df = noticias.asignar("INTC", dt.date(2025, 9, 1))
+                self.assertEqual(por_ratio["dias_inventario"][0]["url"], "m1")      # manual manda
+                self.assertEqual(por_ratio["dias_inventario"][0]["origen"], "equipo")
+                urls = {n["url"] for lista in por_ratio.values() for n in lista}
+                self.assertNotIn("u3", urls)                                       # fuera de la ventana TTM
+                self.assertNotIn("u4", urls)                                       # otra empresa
+                self.assertTrue(any(n["url"] == "u1" for n in por_ratio["margen_operativo"]))
+                self.assertTrue(any(n["url"] == "u2" for n in por_ratio["endeudamiento"]))
+                self.assertEqual(len(df), len(urls))                               # cada noticia una sola vez
+            finally:
+                datos.DIR_DATOS = orig
 
 
 class TestFlujoCompleto(unittest.TestCase):
@@ -194,7 +239,7 @@ class TestFlujoCompleto(unittest.TestCase):
 
                 rc = principal.main(["calcular", "--periodos", "2023", "--salida", str(tmp / "out")])
                 self.assertEqual(rc, 0)
-                for f in ("PC3_INTC.xlsx", "PC3_INTC.html", "PC3_INTC_guion.md",
+                for f in ("PC3_INTC.xlsx", "PC3_INTC.html",
                           "graficos/liquidez_corriente.png", "graficos/dupont.png"):
                     self.assertTrue((tmp / "out" / f).exists(), f)
                 tablas_leidas, ajustadas = datos.cargar_datos()

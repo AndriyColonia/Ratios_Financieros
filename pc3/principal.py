@@ -5,7 +5,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import analisis, config, datos, graficos, ratios, reporte
+import pandas as pd
+
+from . import analisis, config, datos, graficos, noticias, ratios, reporte
 
 DIR_SALIDA = datos.RAIZ / "salida"
 
@@ -21,6 +23,14 @@ def cmd_descargar(args):
     print(f"Guardado: {datos.ARCH_ESTADOS}")
     if datos.crear_plantilla_ajustes():
         print(f"Plantilla para correcciones del equipo: {datos.ARCH_AJUSTES}")
+    foco = getattr(args, "empresa", None) or config.EMPRESA_FOCO
+    try:
+        n = noticias.descargar(foco.upper())
+        print(f"Noticias de {foco.upper()} bajadas de Yahoo: {n}")
+    except Exception as e:  # noqa: BLE001 - las noticias no deben frenar la descarga
+        print(f"No se pudieron bajar las noticias (se sigue sin ellas): {e}")
+    if noticias.crear_plantilla_manual():
+        print(f"Plantilla para noticias del equipo: {noticias.ruta_manual()}")
     return 0
 
 
@@ -63,6 +73,13 @@ def cmd_calcular(args):
             if int(n[:4]) in periodos:
                 notas.append(("Cálculo", analisis.nombre(tk), n))
 
+    desde = None
+    if not info.empty:
+        fila = info[(info.ticker == foco) & (info.periodo == config.ANIO_TTM)]
+        if len(fila):
+            desde = (pd.Timestamp(fila.fecha_cierre.iloc[0]) - pd.Timedelta(days=365)).date()
+    noticias_ratio, noticias_df = noticias.asignar(foco, desde)
+
     salida = Path(args.salida) if args.salida else DIR_SALIDA
     dir_graf = salida / "graficos"
     dir_graf.mkdir(parents=True, exist_ok=True)
@@ -74,16 +91,15 @@ def cmd_calcular(args):
 
     base = f"PC3_{foco}"
     reporte.exportar_excel(salida / f"{base}.xlsx", foco, periodos, tsl, lista_kpis, familias, df,
-                           tabla_dp, textos_dp, tablas, notas)
-    reporte.exportar_guion(salida / f"{base}_guion.md", foco, periodos, lista_kpis, familias, textos_dp)
+                           tabla_dp, textos_dp, tablas, notas, noticias_df)
     reporte.exportar_html(salida / f"{base}.html", dir_graf, foco, periodos, tsl, lista_kpis, familias, df,
-                          tabla_dp, textos_dp, notas, info)
+                          tabla_dp, textos_dp, notas, info, noticias_ratio)
 
     print(f"\n=== {analisis.nombre(foco)}: resumen de KPI ===")
     for familia, c in familias.items():
         print(f"- {c['pregunta']} [{analisis.ESTADOS[c['estado']]}] {c['respuesta']}")
     print(f"\nListo. Abre el reporte:\n  {salida / (base + '.html')}\n  {salida / (base + '.xlsx')}\n"
-          f"  {salida / (base + '_guion.md')}\n  {dir_graf}/ (gráficos para las láminas)")
+          f"  {dir_graf}/ (gráficos para las láminas)")
     if len(notas) > 0:
         print(f"Hay {len(notas)} avisos; revísalos en la hoja 'Notas' del Excel.")
     return 0
@@ -112,6 +128,7 @@ def main(argv=None):
 
     d = sub.add_parser("descargar", help="Baja de Yahoo Finanzas los estados 2022-2026 de las 9 empresas.")
     d.add_argument("--tickers", nargs="*", help="Solo estas empresas (por defecto, las 9).")
+    d.add_argument("--empresa", default=config.EMPRESA_FOCO, help="Empresa de la que se bajan noticias (por defecto INTC).")
     d.add_argument("--modo-2026", choices=["auto", "ttm"], default="auto",
                    help="auto: año fiscal 2026 cerrado si existe, si no TTM. ttm: siempre últimos 12 meses.")
 

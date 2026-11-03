@@ -281,7 +281,6 @@ def _tendencia(serie: list, mejor: str, ratio: str) -> str:
 
 def kpis(tsl: pd.DataFrame, foco: str, periodos) -> list[dict]:
     out = []
-    nom_foco = nombre(foco)
     for ratio, m in config.RATIOS.items():
         sub = tsl[tsl.ratio == ratio].set_index("periodo").reindex(periodos)
         ultimo = sub.dropna(subset=["foco"]).index.max() if sub.foco.notna().any() else periodos[-1]
@@ -291,25 +290,11 @@ def kpis(tsl: pd.DataFrame, foco: str, periodos) -> list[dict]:
         ns = bool(f.foco_ns) if pd.notna(f.foco_ns) else False
         estado, respuesta = veredicto(ratio, f.foco, f.sector, ns)
 
-        posicion = ""
-        if not _nan(f.foco) and not _nan(f.sector):
-            rel = comparar(f.foco, f.sector, m["mejor"])
-            rel_txt = {"mejor": "mejor que", "similar": "en línea con", "peor": "peor que"}[rel]
-            lider = (f"el líder es {f.lider_nombre} con {fmt_ratio(f.lider_valor, ratio)}"
-                     if isinstance(f.lider_ticker, str) and f.lider_ticker != foco
-                     else f"{nom_foco} es el líder del sector")
-            puesto = f" Ocupa el puesto {int(f.puesto)} de {int(f.n_empresas)}." if pd.notna(f.puesto) else ""
-            posicion = (f"En {ultimo}, {nom_foco} registra {fmt_ratio(f.foco, ratio)}, {rel_txt} el sector "
-                        f"({fmt_ratio(f.sector, ratio)}); {lider}.{puesto}")
-        elif ns:
-            posicion = f"En {ultimo}, el ratio de {nom_foco} no es significativo (n.s.)."
-
         out.append(dict(
             ratio=ratio, nombre=m["nombre"], familia=m["familia"], unidad=m["unidad"], formula=m["formula"],
             pregunta=m["pregunta"], reserva=m.get("reserva", False), periodo=int(ultimo),
             estado=estado, estado_txt=ESTADOS[estado], respuesta=respuesta,
-            frase_mide=m["que_mide"], frase_posicion=posicion,
-            frase_significa=respuesta + " " + _tendencia(list(sub.foco.items()), m["mejor"], ratio),
+            evolucion=_tendencia(list(sub.foco.items()), m["mejor"], ratio),
             serie={int(p): sub.at[p, "foco"] for p in periodos},
             serie_est={int(p): bool(sub.at[p, "foco_est"]) if pd.notna(sub.at[p, "foco_est"]) else False for p in periodos},
         ))
@@ -416,7 +401,7 @@ def etiqueta_periodo(p) -> str:
 
 def _brecha(v, ref, ratio: str):
     """Diferencia entre v y ref en la unidad que se muestra. Devuelve None si falta un dato, o
-    (texto de la diferencia, texto relativo, está_por_encima, es_mejor). 'igual' si no hay diferencia."""
+    (texto de la diferencia, texto relativo, está_por_encima, juicio). 'igual' si no hay diferencia."""
     m = meta(ratio)
     if _nan(v) or _nan(ref):
         return None
@@ -426,7 +411,7 @@ def _brecha(v, ref, ratio: str):
     if abs(dif) < 0.005:
         return "igual"
     arriba = dif > 0
-    es_mejor = arriba if m["mejor"] == "alto" else not arriba
+    juicio = comparar(v, ref, m["mejor"])      # mejor / similar (±10 %) / peor: igual que la lectura del KPI
     a = abs(dif)
     texto = {"%": f"{a:,.2f} p.p.", "días": f"{a:,.2f} días", "años": f"{a:,.2f} años",
              "M USD": f"{a:,.0f} M USD"}.get(unidad, f"{a:,.2f}x")
@@ -435,7 +420,7 @@ def _brecha(v, ref, ratio: str):
     if (unidad != "%" or pct(ratio)) and ref != 0:
         r = (v - ref) / abs(ref) * 100
         rel = f" ({abs(r):,.2f} % {'más' if r > 0 else 'menos'})"
-    return texto, rel, arriba, es_mejor
+    return texto, rel, arriba, juicio
 
 
 def comentario_brecha(tsl: pd.DataFrame, ratio: str, foco: str, periodo: int) -> str:
@@ -455,9 +440,9 @@ def comentario_brecha(tsl: pd.DataFrame, ratio: str, foco: str, periodo: int) ->
             return f"sin dato {del_quien} para comparar"
         if b == "igual":
             return f"igual {del_quien}"
-        texto, rel, arriba, mejor = b
+        texto, rel, arriba, juicio = b
         return (f"{texto} {'por encima' if arriba else 'por debajo'} {del_quien}{rel}, "
-                f"es decir, {'mejor' if mejor else 'peor'}")
+                f"es decir, {'en línea (±10 %)' if juicio == 'similar' else juicio}")
 
     txt = inicio + f"{nom} está {frase(f.sector, 'del sector')}."
     if f.lider_ticker == foco:

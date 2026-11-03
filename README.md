@@ -12,7 +12,7 @@ Programa en Python que:
      ¿cobra rápido?, ¿es rentable?...) con **sí/no y por qué**, más una conclusión por familia.
    - **Tablas tipo profesor** (Intel / Sector / Líder / empresa líder / puesto) por año.
    - **Gráficos** para las láminas: Intel vs sector vs líder por año, ranking de las 9 empresas y DuPont.
-   - **Guion de 3 frases por ratio** (qué mide, dónde está, qué significa) para estudiar la exposición.
+   - **Noticias** que respaldan por qué cada ratio está así en el 2026 TTM (ver más abajo).
 
 ## Instalación (una sola vez)
 
@@ -36,7 +36,6 @@ Abre los resultados de la carpeta `salida/`:
 |---|---|
 | `salida/PC3_INTC.html` | Reporte completo (doble clic para abrirlo en el navegador): KPI, ratios, DuPont, gráficos y las 9 empresas |
 | `salida/PC3_INTC.xlsx` | Hojas: Conclusiones, KPI, Tablas PC3, DuPont, Todas las empresas, Datos base y Notas |
-| `salida/PC3_INTC_guion.md` | Guion de estudio: 3 frases por ratio + DuPont + conexiones que pregunta el profesor |
 | `salida/graficos/*.png` | Gráficos listos para pegar en el PPT (16:9) |
 
 Otros comandos:
@@ -73,11 +72,44 @@ python ejecutar.py descargar --modo-2026 ttm
 python ejecutar.py publicar
 ```
 
-Genera la página en `docs/` (`index.html` + Excel + guion + gráficos). Súbela con
+Genera la página en `docs/` (`index.html` + Excel + gráficos). Súbela con
 `git add docs`, `git commit` y `git push`. GitHub Pages la publica en
 `https://<usuario>.github.io/<repositorio>/`, que se abre en cualquier navegador o celular.
 La primera vez hay que activar Pages en GitHub: **Settings → Pages → Source: Deploy from a branch →**
 rama del proyecto y carpeta **/docs** → Save.
+
+## Noticias que respaldan cada ratio
+
+Cada ratio muestra hasta 2 noticias de la ventana del 2026 TTM (los 12 meses hasta el cierre del TTM).
+
+- **Automáticas:** `descargar` baja las noticias recientes de Intel de Yahoo Finanzas a `datos/noticias_yahoo.csv`
+  y las asigna a cada ratio por palabras clave (por ejemplo "debt" va a endeudamiento, "layoffs" a margen operativo).
+  Es una coincidencia automática, **no una validación**: léanlas antes de usarlas en la exposición.
+  Yahoo solo entrega las noticias más recientes, no todo el año.
+- **Del equipo:** escriban las que sí validan el resultado en `datos/noticias_manuales.csv`
+  (columnas `ticker,ratio,fecha,titular,fuente,extracto,url`). Con la columna `ratio` rellena
+  (por ejemplo `dias_inventario`, `margen_bruto`, `endeudamiento`) se muestra siempre en ese ratio y tiene
+  prioridad sobre las automáticas. Sin `ratio`, entra al reparto por palabras clave.
+  Fuentes recomendadas: comunicado de resultados y 10-Q de la empresa (SEC EDGAR), Reuters, Bloomberg.
+- Todas las noticias usadas salen también en la hoja **Noticias** del Excel.
+
+## Cómo se decide Fortaleza, Atención o Debilidad
+
+Son reglas prácticas del programa (están en la función `veredicto` de `pc3/analisis.py` y se pueden cambiar):
+
+| Ratio | Fortaleza | Atención | Debilidad |
+|---|---|---|---|
+| Liquidez corriente | ≥ 1.5 | entre 1 y 1.5 | < 1 |
+| Prueba ácida | ≥ 1 | entre 0.8 y 1 | < 0.8 |
+| Capital de trabajo | > 0 | — | ≤ 0 |
+| Endeudamiento (Pasivo/Patrimonio) | < 1 | entre 1 y 2 | ≥ 2 |
+| Cobertura de deuda (Deuda/EBITDA) | ≤ 3 años | entre 3 y 4 | > 4 años o EBITDA negativo |
+| Días de inventario, cobro y ciclo de efectivo | menos días que el sector (> 10 %) | similar (±10 %) | más días que el sector |
+| Días de pago | menos días que el sector | similar o más días (da caja, pero puede ser presión de liquidez) | — |
+| Márgenes, ROA, ROE | positivo y mayor que el sector | positivo, similar o menor al sector | negativo |
+
+Cada familia (liquidez, solvencia, eficiencia, rentabilidad) resume así: si ningún ratio es debilidad y al menos
+la mitad son fortaleza → **Sí**; si al menos la mitad son debilidad → **No**; si no → **En parte**.
 
 ## Cómo trabaja el equipo con los datos
 
